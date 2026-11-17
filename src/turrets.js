@@ -123,6 +123,13 @@ export function init(ctx) {
     }
   }
 
-  ctx.turrets = { list, config: CFG, deploy };
+  // put one turret at a chosen spot (used for high-threat locations); skipped if one already stands there
+  function add(x, z, yaw) {
+    if (!player.free(x, 0.01, z, 1.6) || list.some((o) => o.alive && Math.hypot(o.pos.x - x, o.pos.z - z) < 4)) return false;
+    const t = list.find((o) => !o.alive) || make();
+    t.pos.set(x, 0, z); t.c.set(x, 1.25, z); t.base = t.yaw = yaw; t.hp = CFG.hp; t.alive = true; t.awareness = 0; t.alertState = 'unaware'; t.lastSeen = 99;
+    t.eye.emissive.setHex(EYE.unaware); t.group.position.set(x, 0, z); t.group.visible = true; return true;
+  }
+  ctx.turrets = { list, config: CFG, deploy, add };
   return { update };
 }

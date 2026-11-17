@@ -17,7 +17,7 @@ export function init(ctx) {
   document.head.appendChild(style);
   const root = document.createElement('div'); root.id = 'mp'; root.hidden = true;
   root.innerHTML = `<div class="box"><h2>Map</h2><canvas width="${SIZE}" height="${SIZE}"></canvas>
-    <div class="lg"><span><i style="background:#9be37a"></i>Exit</span><span><i style="background:#d48bff"></i>Key exit / strongroom</span><span><i style="background:#ffc56b"></i>Beacon exit / zipline</span><span><i style="background:#ff6a00"></i>Arms locker (found)</span><span><i style="background:#35e0d8"></i>Jump pad</span><span><i style="background:#fff"></i>You</span><span>2F = floors</span><span style="margin-left:auto;opacity:.6">M to close</span></div></div>`;
+    <div class="lg"><span><i style="background:#9be37a"></i>Exit</span><span><i style="background:#d48bff"></i>Key exit / strongroom</span><span><i style="background:#ffc56b"></i>Beacon exit / zipline</span><span><i style="background:#ff6a00"></i>Arms locker (found)</span><span><i style="background:#35e0d8"></i>Jump pad</span><span><i style="background:#fff"></i>You</span><span>2F = floors</span><span>Threat: <b style="color:#9be37a">low</b> <b style="color:#ffe14a">medium</b> <b style="color:#ff9a3c">high</b> <b style="color:#ff5a4a">critical</b></span><span style="margin-left:auto;opacity:.6">M to close</span></div></div>`;
   ctx.hud.appendChild(root);
   const g = root.querySelector('canvas').getContext('2d');
   const A = world.arenaHalf, HALF = A + 4, K = SIZE / (HALF * 2); // metres from centre to the wall, to the map edge, px per metre
@@ -47,7 +47,9 @@ export function init(ctx) {
       g.fillStyle = '#56616d'; g.fillRect(X(b.x - b.w / 2), Z(b.z - b.d / 2), b.w * K, b.d * K);
       g.strokeStyle = '#8b97a3'; g.strokeRect(X(b.x - b.w / 2) + 0.5, Z(b.z - b.d / 2) + 0.5, b.w * K, b.d * K);
       g.fillStyle = 'rgba(255,255,255,.75)'; g.fillText(`${b.floors}F`, X(b.x), Z(b.z));
-      if (b.tower) { g.fillStyle = '#ffc56b'; g.fillText('TOWER', X(b.x), Z(b.z + b.d / 2) + 9); }
+      const tc = b.threat && world.threatColors ? world.threatColors[b.threat] : null;
+      if (tc) { g.fillStyle = tc; g.fillText(b.threat.toUpperCase(), X(b.x), Z(b.z + b.d / 2) + 20); g.strokeStyle = tc; g.lineWidth = 2; g.strokeRect(X(b.x - b.w / 2), Z(b.z - b.d / 2), b.w * K, b.d * K); g.lineWidth = 1; }
+      if (b.tower) { g.fillStyle = '#ffc56b'; g.fillText(b.w > 24 ? 'HALL' : 'TOWER', X(b.x), Z(b.z + b.d / 2) + 9); }
       if (b.outpost) { g.fillStyle = '#7fd6ff'; g.fillText(b.outpost === 'depot' ? 'SUPPLY DUMP' : b.outpost.toUpperCase(), X(b.x), Z(b.z + b.d / 2) + 9); }
     }
     // perimeter

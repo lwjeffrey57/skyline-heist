@@ -57,6 +57,9 @@ function districtAt(x, z) {
   if (Math.abs(z) >= Math.abs(x)) return z > 0 ? 'Depot' : 'Freight Row';
   return x > 0 ? 'Exchange' : 'Works';
 }
+// Threat: every named location has a rating you can read on the map. Higher threat means better loot and more defences.
+const THREAT = { low: { luck: 0, color: '#9be37a' }, medium: { luck: 0.3, color: '#ffe14a' }, high: { luck: 0.6, color: '#ff9a3c' }, critical: { luck: 0.85, color: '#ff5a4a' } };
+const OUTPOST_THREAT = { infirmary: 'low', depot: 'low', signal: 'medium', watch: 'medium', armoury: 'high' };
 const EXITS = [[-62, 42], [62, -30], [0, -64], [62, 50], [-62, -30]];
 const SPAWNS = [[0, 50], [-48, 58], [48, 58], [-62, 20], [62, 22], [-62, -20], [62, -10], [-40, -60], [0, -60], [36, -60], [-20, 60], [26, 46]];
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -262,6 +265,13 @@ export function init(ctx) {
       if (kind === 'vault') { L.locked = !world.strongroom; // behind the strongroom door, the case itself is not locked
         if (Math.random() < 0.25) L.items.push({ name: 'Black Ledger', tier: 'epic', value: 2500 }); }
     }
+    // better loot where the threat is higher: common items there are often re-rolled at much better odds
+    for (const L of lootables) {
+      if (L.kind !== 'standard' && L.kind !== 'secure') continue;
+      const b = world.buildings.find((q) => q.threat && Math.abs(L.pos.x - q.x) < q.w / 2 && Math.abs(L.pos.z - q.z) < q.d / 2); if (!b) continue;
+      const p = THREAT[b.threat].luck; L.items = L.items.map((it) => (it.tier === 'common' && Math.random() < p ? rollItem(4) : it));
+    }
+    for (const b of world.buildings) if (b.threat === 'critical') (kindsDue || (kindsDue = [])).push([b, 'heavy']); // critical sites get a heavy as well
     // vault cases are locked: one keycard is hidden in a secure crate (heavies and marksmen sometimes carry one too)
     const secure = lootables.filter((L) => L.kind === 'secure');
     if (secure.length) secure[Math.floor(Math.random() * secure.length)].items.push({ supply: 'key', name: 'Keycard' });
@@ -314,6 +324,10 @@ export function init(ctx) {
     else { L.opened = true; L.strip.material = mats(L.kind).dead; if (L.lid) { L.lid.rotation.z = 0.9; L.lid.position.set(-0.36, 0.72, 0); } if (L.kind === 'bag') L.group.visible = false; }
     events.emit('lootTaken', { kind: L.kind, district: L.district });
   }
+
+  for (const b of world.buildings) b.threat = b.outpost ? OUTPOST_THREAT[b.outpost] : b.tower ? (b.floors >= 5 ? 'critical' : b.floors >= 4 ? 'high' : 'medium') : null;
+  if (world.strongroom) world.strongroom.threat = 'critical';
+  world.threatColors = Object.fromEntries(Object.entries(THREAT).map(([k, v]) => [k, v.color]));
 
   // ---- contracts ----------------------------------------------------------
   function rollContracts() {
@@ -414,6 +428,11 @@ export function init(ctx) {
     placeCrates(); setBots(true);
     panel.hidden = true; if (menu) menu.hide();
     events.emit('raidStart', {});
+    if (ctx.turrets && ctx.turrets.add) for (const b of world.buildings) { // high and critical sites are covered by a turret at the door
+      if (b.threat !== 'high' && b.threat !== 'critical') continue;
+      const sx = Math.random() < 0.5 ? -1 : 1;
+      ctx.turrets.add(b.x + sx * (b.w / 2 + 3), b.z + b.d / 2 + 2.5, Math.atan2(sx * 0.4, 1));
+    }
   }
   function endRaid(kind) {
     if (state !== 'raid') return;
