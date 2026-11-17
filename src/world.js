@@ -269,7 +269,35 @@ export function createWorld(scene, renderer) {
   const E = ARENA - 8;
   const spawnPoints = [[0, E], [-90, E], [90, E], [-E, 60], [E, 60], [-E, -60], [E, -60], [-90, -E], [0, -E], [90, -E], [-E, 0], [E, 0]];
   const exitPoints = [[-E, 105], [E, -80], [0, -E], [E, 110], [-E, -85]];
-  const outbuildings = [];
+  const outbuildings = [], roads = [], compoundWalls = [];
+  // ---- the compound's bones: an inner wall with gates around the centre, and roads from the outer wall to those gates
+  {
+    const IW = CORE + 3, PANELS = 18, plen = (IW * 2) / PANELS, WH = 4.2;
+    const GATES = { n: [0, 38], s: [0, -38], e: [0], w: [0] }; // gate centres along each side
+    const side = (name, fixed, alongX) => {
+      for (let k = 0; k < PANELS; k++) {
+        const c = -IW + plen * (k + 0.5), gate = GATES[name].some((g) => Math.abs(c - g) < plen * 0.55);
+        if (gate) continue; // an open gateway, one panel wide
+        const m = alongX ? addBox(c, 0, fixed, plen, WH, 0.4, M.concrete, { tag: 'wall', destructible: true }) : addBox(fixed, 0, c, 0.4, WH, plen, M.concrete, { tag: 'wall', destructible: true });
+        compoundWalls.push(m.userData.collider);
+      }
+      for (const gc of GATES[name]) for (const s of [-1, 1]) { // gate posts with a light on top
+        const p = gc + s * plen * 0.56, x = alongX ? p : fixed, z = alongX ? fixed : p;
+        addBox(x, 0, z, 0.9, WH + 0.6, 0.9, M.concreteDark, { tag: 'post' });
+        addBox(x, WH + 0.6, z, 0.5, 0.12, 0.5, M.glowAmber, { solid: false, shadow: false });
+      }
+    };
+    side('n', -IW, true); side('s', IW, true); side('w', -IW, false); side('e', IW, false);
+    // roads: paved lanes kept clear of clutter, so they are the quick way in and the exposed one
+    const road = (x, z, wd, dp) => { roads.push([x - wd / 2, x + wd / 2, z - dp / 2, z + dp / 2]); addBox(x, 0.004, z, wd, 0.012, dp, M.concreteDark, { solid: false, shadow: false }); };
+    const mid = (IW + ARENA) / 2, len = ARENA - IW;
+    road(0, -mid, 7, len); road(0, mid, 7, len); road(-mid, 0, len, 7); road(mid, 0, len, 7);
+    const RR = 128; // the ring road runs outside the outposts' yards
+    road(38, -(IW + RR) / 2, 6, RR - IW + 3); road(-38, (IW + RR) / 2, 6, RR - IW + 3); // spurs from the side gates to the ring road
+    road(0, -RR, RR * 2 + 6, 6); road(0, RR, RR * 2 + 6, 6); road(-RR, 0, 6, RR * 2 + 6); road(RR, 0, 6, RR * 2 + 6);
+    for (let d = IW + 6; d < ARENA - 4; d += 12) { mark(0, -d, 0.25, 4); mark(0, d, 0.25, 4); mark(-d, 0, 4, 0.25); mark(d, 0, 4, 0.25); }
+  }
+  const onRoad = (x0, x1, z0, z1) => roads.some(([a, b, c, d]) => x0 < b && x1 > a && z0 < d && z1 > c);
   {
     const keepClear = spawnPoints.concat(exitPoints);
     const clearOf = (x0, x1, z0, z1, r) => !keepClear.some(([px, pz]) => px > x0 - r && px < x1 + r && pz > z0 - r && pz < z1 + r);
@@ -287,8 +315,17 @@ export function createWorld(scene, renderer) {
       const x = ox + jit(3), z = oz + jit(3);
       building(x, z, rand() < 0.5 ? 14 : 12, rand() < 0.5 ? 12 : 10, rand() < 0.5 ? 1 : 2, pick(ACCENTS)); // stays in `buildings`: guards post here and it gets crates
       buildings[buildings.length - 1].outpost = TYPES.pop(); // each outpost has a purpose (raid.js gives it its contents)
+      { // a walled yard with two ways in, so you choose which side to come at it from
+        const Y = 14, open = [0, 1, 2, 3].map((i) => [rand(), i]).sort((p, q) => p[0] - q[0]).slice(0, 2).map((p) => p[1]);
+        for (let sd = 0; sd < 4; sd++) for (const half of [-1, 1]) {
+          if (open.includes(sd) && half === 1) continue; // half of this side is left open as an entrance
+          const c = half * Y / 2, alongX = sd < 2, fixed = (sd % 2 ? 1 : -1) * Y;
+          const m = alongX ? addBox(x + c, 0, z + fixed, Y, 1.7, 0.35, M.concrete, { tag: 'cover', destructible: true }) : addBox(x + fixed, 0, z + c, 0.35, 1.7, Y, M.concrete, { tag: 'cover', destructible: true });
+          compoundWalls.push(m.userData.collider);
+        }
+      }
       for (let k = 0; k < 5; k++) {
-        const a = rand() * Math.PI * 2, d = 11 + rand() * 8, cx = x + Math.cos(a) * d, cz = z + Math.sin(a) * d, cont = rand() < 0.4, alongX = rand() < 0.5;
+        const a = rand() * Math.PI * 2, d = 9 + rand() * 4, cx = x + Math.cos(a) * d, cz = z + Math.sin(a) * d, cont = rand() < 0.4, alongX = rand() < 0.5; // inside the yard
         const bw = cont ? (alongX ? 6 : 2.4) : (alongX ? 3.4 : 0.6), bd = cont ? (alongX ? 2.4 : 6) : (alongX ? 0.6 : 3.4);
         if (blocked(cx - bw / 2, cx + bw / 2, cz - bd / 2, cz + bd / 2, 1.2)) continue;
         addBox(cx, 0, cz, bw, cont ? 2.6 : 1.15, bd, cont ? pick([M.rust, M.navy, M.teal, M.amber, M.cream]) : M.concrete, { tag: cont ? 'container' : 'cover', destructible: !cont });
@@ -303,7 +340,7 @@ export function createWorld(scene, renderer) {
       else if (kind < 0.6) { const rot = rand() < 0.5; bw = rot ? 0.6 : 3.4; bd = rot ? 3.4 : 0.6; bh = 1.15; mat = M.concrete; tag = 'cover'; }
       else if (kind < 0.85) { const rot = rand() < 0.5; bw = rot ? 0.5 : 3.0; bd = rot ? 3.0 : 0.5; bh = 2.3; mat = M.concrete; tag = 'cover'; }
       else { bw = bd = 1.8; bh = 1.4; mat = M.concreteDark; tag = 'cover'; }
-      if (blocked(x - bw / 2, x + bw / 2, z - bd / 2, z + bd / 2, 1.2) || !clearOf(x - bw / 2, x + bw / 2, z - bd / 2, z + bd / 2, 4)) continue;
+      if (blocked(x - bw / 2, x + bw / 2, z - bd / 2, z + bd / 2, 1.2) || !clearOf(x - bw / 2, x + bw / 2, z - bd / 2, z + bd / 2, 4) || onRoad(x - bw / 2 - 1, x + bw / 2 + 1, z - bd / 2 - 1, z + bd / 2 + 1)) continue;
       addBox(x, 0, z, bw, bh, bd, mat, { tag, destructible });
     }
   }
@@ -367,7 +404,7 @@ export function createWorld(scene, renderer) {
 
   // ---- queries & edits used by the other systems ---------------------------
   const world = {
-    colliders, pads, ziplines, buildings, materials: M, arenaHalf: ARENA, coreHalf: CORE, spawnPoints, exitPoints, outbuildings, seed, strongroom,
+    colliders, pads, ziplines, buildings, materials: M, arenaHalf: ARENA, coreHalf: CORE, spawnPoints, exitPoints, outbuildings, roads, compoundWalls, seed, strongroom,
     spawn: new THREE.Vector3(0, 0, 50),
     // nearest solid box along a ray -> { collider, point, normal, dist } or null
     // every solid piece touching the box x0..x1, z0..z1 (any height), written into `out` and returned

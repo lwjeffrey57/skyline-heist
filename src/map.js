@@ -32,6 +32,9 @@ export function init(ctx) {
     g.strokeRect(X(-17), Z(-17), 34 * K, 34 * K);
     for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { g.beginPath(); g.moveTo(X(17 * sx), Z(17 * sz)); g.lineTo(X(A * sx), Z(A * sz)); g.stroke(); }
     g.setLineDash([]);
+    // roads, then the compound's walls
+    g.fillStyle = '#1d242c'; for (const [x0, x1, z0, z1] of world.roads || []) g.fillRect(X(x0), Z(z0), (x1 - x0) * K, (z1 - z0) * K);
+    g.fillStyle = '#9aa6b2'; for (const c of world.compoundWalls || []) { if (!world.colliders.includes(c)) continue; g.fillRect(X(c.min.x), Z(c.min.z), Math.max(1.5, (c.max.x - c.min.x) * K), Math.max(1.5, (c.max.z - c.min.z) * K)); }
     // cover and containers
     for (const c of world.colliders) {
       if (c.tag !== 'cover' && c.tag !== 'container' || c.min.y > 0.5) continue;
