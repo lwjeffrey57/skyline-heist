@@ -61,7 +61,7 @@ export function init(ctx) {
     }
   });
   poi('plaza', -6, 6, -6, 6, 0.8, 1.2, 1);
-  const A = world.arenaHalf - 4;
+  const A = (world.coreHalf || world.arenaHalf) - 4 /* guards live in the built-up centre */;
   for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
     const s = (A * 2) / 3; poi(`ground${i}${j}`, -A + i * s + 3, -A + (i + 1) * s - 3, -A + j * s + 3, -A + (j + 1) * s - 3, -0.2, 0.4, 0.7);
   }
@@ -69,7 +69,7 @@ export function init(ctx) {
   // ---- spawning -----------------------------------------------------------
   const eye = new THREE.Vector3(), pt = new THREE.Vector3();
   function findSpawn() {
-    const H = world.arenaHalf - 4;
+    const H = (world.coreHalf || world.arenaHalf) - 4 /* guards live in the built-up centre */;
     const others = ctx.targets.filter((t) => t.alive && t.pos); // every living combatant (player and bots)
     let fallback = null, fbD = -1;
     for (let t = 0; t < 70; t++) {

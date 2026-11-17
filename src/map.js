@@ -1,7 +1,7 @@
 // Full map (M): the whole arena from above with districts, buildings, the strongroom, exits, jump pads, ziplines and
 // any arms lockers you have come close to. North is up. The raid keeps running while it is open.
 
-const SIZE = 600, HALF = 74, K = SIZE / (HALF * 2); // canvas px, metres from centre to edge, px per metre
+const SIZE = 600; // canvas px
 const DISTRICT_AT = { Plaza: [0, 0], Depot: [0, 46], 'Freight Row': [0, -46], Works: [-46, 0], Exchange: [46, 0] };
 
 export function init(ctx) {
@@ -20,16 +20,17 @@ export function init(ctx) {
     <div class="lg"><span><i style="background:#9be37a"></i>Exit</span><span><i style="background:#d48bff"></i>Strongroom</span><span><i style="background:#ff6a00"></i>Arms locker (found)</span><span><i style="background:#35e0d8"></i>Jump pad</span><span><i style="background:#ffc56b"></i>Zipline</span><span><i style="background:#fff"></i>You</span><span style="margin-left:auto;opacity:.6">M to close</span></div></div>`;
   ctx.hud.appendChild(root);
   const g = root.querySelector('canvas').getContext('2d');
+  const A = world.arenaHalf, HALF = A + 4, K = SIZE / (HALF * 2); // metres from centre to the wall, to the map edge, px per metre
   const X = (x) => (x + HALF) * K, Z = (z) => (z + HALF) * K;
   let open = false, frame = 0;
 
   function draw() {
     g.clearRect(0, 0, SIZE, SIZE);
-    g.fillStyle = '#12171d'; g.fillRect(X(-70), Z(-70), 140 * K, 140 * K);
+    g.fillStyle = '#12171d'; g.fillRect(X(-A), Z(-A), A * 2 * K, A * 2 * K);
     // district borders and names
     g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = 1; g.setLineDash([5, 5]);
     g.strokeRect(X(-17), Z(-17), 34 * K, 34 * K);
-    for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { g.beginPath(); g.moveTo(X(17 * sx), Z(17 * sz)); g.lineTo(X(70 * sx), Z(70 * sz)); g.stroke(); }
+    for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { g.beginPath(); g.moveTo(X(17 * sx), Z(17 * sz)); g.lineTo(X(A * sx), Z(A * sz)); g.stroke(); }
     g.setLineDash([]);
     // cover and containers
     for (const c of world.colliders) {
@@ -39,13 +40,13 @@ export function init(ctx) {
     }
     // buildings
     g.font = '600 10px "Bahnschrift","Arial Narrow",sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    for (const b of world.buildings) {
+    for (const b of world.buildings.concat(world.outbuildings || [])) {
       g.fillStyle = '#56616d'; g.fillRect(X(b.x - b.w / 2), Z(b.z - b.d / 2), b.w * K, b.d * K);
       g.strokeStyle = '#8b97a3'; g.strokeRect(X(b.x - b.w / 2) + 0.5, Z(b.z - b.d / 2) + 0.5, b.w * K, b.d * K);
       g.fillStyle = 'rgba(255,255,255,.75)'; g.fillText(`${b.floors} floor${b.floors > 1 ? 's' : ''}`, X(b.x), Z(b.z));
     }
     // perimeter
-    g.strokeStyle = '#8b97a3'; g.lineWidth = 2; g.strokeRect(X(-70), Z(-70), 140 * K, 140 * K); g.lineWidth = 1;
+    g.strokeStyle = '#8b97a3'; g.lineWidth = 2; g.strokeRect(X(-A), Z(-A), A * 2 * K, A * 2 * K); g.lineWidth = 1;
     // district names
     g.font = '600 11px "Bahnschrift","Arial Narrow",sans-serif'; g.fillStyle = 'rgba(255,197,107,.8)';
     for (const name in DISTRICT_AT) { const [x, z] = DISTRICT_AT[name]; g.fillText(name.toUpperCase(), X(x), Z(z) + (name === 'Plaza' ? 60 : 0)); }
@@ -61,7 +62,7 @@ export function init(ctx) {
     g.font = '700 10px "Bahnschrift","Arial Narrow",sans-serif';
     if (raid) for (const zn of raid.zones) {
       if (!zn.active) continue;
-      const x = X(Math.max(-68, Math.min(68, zn.x))), z = Z(Math.max(-68, Math.min(68, zn.z)));
+      const x = X(Math.max(-A + 2, Math.min(A - 2, zn.x))), z = Z(Math.max(-A + 2, Math.min(A - 2, zn.z)));
       g.save(); g.translate(x, z); g.rotate(Math.PI / 4); g.fillStyle = '#9be37a'; g.fillRect(-6, -6, 12, 12); g.restore();
       g.fillStyle = '#9be37a'; g.fillText('EXIT', x, z + (zn.z > 0 ? -15 : 15));
     }

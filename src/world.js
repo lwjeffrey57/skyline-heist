@@ -75,7 +75,8 @@ export function createWorld(scene, renderer) {
   const B = (tag) => ({ tag, destructible: true }); // building piece
 
   // ---- ground -------------------------------------------------------------
-  const ARENA = 70; // half-size
+  const ARENA = 100; // half-size of the whole walled site
+  const CORE = 70;   // half-size of the built-up centre; the ring outside it is open approach ground
   {
     const g = new THREE.PlaneGeometry(900, 900);
     const uv = g.attributes.uv;
@@ -264,6 +265,34 @@ export function createWorld(scene, renderer) {
     }
   }
 
+  // ---- outer ring: open ground between the wall and the built-up centre. You deploy at its edge, out of the fight.
+  const E = ARENA - 8;
+  const spawnPoints = [[0, E], [-58, E], [58, E], [-E, 34], [E, 34], [-E, -34], [E, -34], [-58, -E], [0, -E], [58, -E], [-E, 0], [E, 0]];
+  const exitPoints = [[-E, 64], [E, -48], [0, -E], [E, 66], [-E, -50]];
+  const outbuildings = [];
+  {
+    const keepClear = spawnPoints.concat(exitPoints);
+    const clearOf = (x0, x1, z0, z1, r) => !keepClear.some(([px, pz]) => px > x0 - r && px < x1 + r && pz > z0 - r && pz < z1 + r);
+    // a few small sheds: cover on the way in, but no guards are posted in them and they hold no lockers
+    for (const [x, z] of [[-86, -66], [86, 12], [30, -87], [-34, 87], [84, -74], [-86, 60]]) {
+      if (rand() < 0.45 || !clearOf(x - 6, x + 6, z - 5, z + 5, 6)) continue;
+      building(x + jit(1), z + jit(1), 12, 10, 1, pick(ACCENTS));
+      outbuildings.push(buildings.pop());
+    }
+    // scattered barriers, slabs and containers all the way round
+    for (let i = 0; i < 80; i++) {
+      const side = Math.floor(rand() * 4), along = (rand() * 2 - 1) * (ARENA - 6), depth = CORE + 4 + rand() * (ARENA - CORE - 12);
+      const x = side === 0 ? along : side === 1 ? along : side === 2 ? depth : -depth, z = side === 0 ? depth : side === 1 ? -depth : along;
+      const kind = rand(); let bw, bh, bd, mat, tag, destructible = true;
+      if (kind < 0.2) { const alongX = rand() < 0.5; bw = alongX ? 6 : 2.4; bd = alongX ? 2.4 : 6; bh = 2.6; mat = pick([M.rust, M.navy, M.teal, M.amber, M.cream]); tag = 'container'; destructible = false; }
+      else if (kind < 0.6) { const rot = rand() < 0.5; bw = rot ? 0.6 : 3.4; bd = rot ? 3.4 : 0.6; bh = 1.15; mat = M.concrete; tag = 'cover'; }
+      else if (kind < 0.85) { const rot = rand() < 0.5; bw = rot ? 0.5 : 3.0; bd = rot ? 3.0 : 0.5; bh = 2.3; mat = M.concrete; tag = 'cover'; }
+      else { bw = bd = 1.8; bh = 1.4; mat = M.concreteDark; tag = 'cover'; }
+      if (blocked(x - bw / 2, x + bw / 2, z - bd / 2, z + bd / 2, 1.2) || !clearOf(x - bw / 2, x + bw / 2, z - bd / 2, z + bd / 2, 4)) continue;
+      addBox(x, 0, z, bw, bh, bd, mat, { tag, destructible });
+    }
+  }
+
   // stepped parkour towers
   for (let i = 0; i < 5; i++) addBox(48 + i * 3.2, 0, -52 + (i % 2) * 2.5, 2.6, 1.2 + i * 1.3, 2.6, i % 2 ? M.teal : M.concreteDark);
   for (let i = 0; i < 4; i++) addBox(-58, 0, -54 + i * 4, 3, 1.5 + i * 1.5, 3, i % 2 ? M.amber : M.concreteDark);
@@ -323,7 +352,7 @@ export function createWorld(scene, renderer) {
 
   // ---- queries & edits used by the other systems ---------------------------
   const world = {
-    colliders, pads, ziplines, buildings, materials: M, arenaHalf: ARENA, seed, strongroom,
+    colliders, pads, ziplines, buildings, materials: M, arenaHalf: ARENA, coreHalf: CORE, spawnPoints, exitPoints, outbuildings, seed, strongroom,
     spawn: new THREE.Vector3(0, 0, 50),
     // nearest solid box along a ray -> { collider, point, normal, dist } or null
     // every solid piece touching the box x0..x1, z0..z1 (any height), written into `out` and returned

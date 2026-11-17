@@ -239,6 +239,8 @@ export function init(ctx) {
     // every raid has at least one vault case: if no tall building rolled one, a rooftop crate is promoted
     if (world.strongroom) { const [a, b] = world.strongroom.inside; spots.push(['vault', a[0], a[1], a[2]], ['secure', b[0], b[1], b[2]]); }
     else if (!spots.some((s) => s[0] === 'vault')) { const roofs = spots.filter((s) => s[4]); if (roofs.length) roofs[Math.floor(Math.random() * roofs.length)][0] = 'vault'; }
+    // a few crates out in the approach ring, so the walk in is worth something
+    if (world.coreHalf) for (let i = 0; i < 10; i++) { const a = Math.random() * Math.PI * 2, d = world.coreHalf + 6 + Math.random() * (world.arenaHalf - world.coreHalf - 14); spots.push(['standard', Math.max(-d, Math.min(d, Math.cos(a) * d * 1.3)), 0, Math.max(-d, Math.min(d, Math.sin(a) * d * 1.3))]); }
     for (const [kind, x, y, z] of spots) {
       if (!player.free(x, y + 0.75, z, 0.5)) continue; // something solid is in the way
       const L = addLootable(kind, x, floorBelow(x, y + 0.4, z), z, Math.random() * Math.PI);
@@ -324,7 +326,7 @@ export function init(ctx) {
   rollContracts();
 
   // ---- extraction zones ---------------------------------------------------
-  const zones = EXITS.map(([x, z]) => {
+  const zones = (world.exitPoints || EXITS).map(([x, z]) => {
     const g = new THREE.Group();
     const ring = new THREE.Mesh(new THREE.TorusGeometry(RAID.extractRadius, 0.08, 8, 64), new THREE.MeshBasicMaterial({ color: 0x9be37a }));
     ring.rotation.x = Math.PI / 2; ring.position.y = 0.06; g.add(ring);
@@ -364,8 +366,9 @@ export function init(ctx) {
       else if (it.t === 'loot') pack.push({ name: it.name, tier: it.tier, value: it.value });
     }
     stash.pack = (stash.pack || []).map(() => null); stash.inRaid = true;
-    const free = SPAWNS.filter(([x, z]) => player.free(x, 0.01, z, 1.8));
-    const [sx, sz] = free[Math.floor(Math.random() * free.length)] || SPAWNS[0];
+    const points = world.spawnPoints || SPAWNS; // at the edge of the site, outside the built-up centre
+    const free = points.filter(([x, z]) => player.free(x, 0.01, z, 1.8));
+    const [sx, sz] = free[Math.floor(Math.random() * free.length)] || points[0];
     world.spawn.set(sx, 0, sz); world.spawnYaw = Math.atan2(sx, sz);
     // the two exits farthest from where you start, so every raid means crossing the map
     const order = zones.slice().sort((a, b) => Math.hypot(b.x - sx, b.z - sz) - Math.hypot(a.x - sx, a.z - sz));
