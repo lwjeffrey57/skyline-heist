@@ -1,0 +1,12 @@
+Recorded gunshots in this folder are cut from "The Free Firearm Sound Library"
+(Prepared SFX Library), published at https://opengameart.org/content/the-free-firearm-sound-library
+Licence: CC0 1.0 (public domain dedication). The library's authors state: "Our team holds CC0 NO RIGHTS
+RESERVED for this library. It may be used without royalty or credit".
+
+rifle_1.wav, rifle_2.wav        from AR-15/D_32P.wav  (near distance)
+shotgun_1.wav, shotgun_2.wav    from Nova/O_21P.wav   (near distance)
+sniper_1.wav, sniper_2.wav      from Tikka/W_29P.wav  (near distance)
+distant_1..3.wav                from SKS/U_19P.wav    (mid distance)
+pistol_1..3.wav                 from Walther PPQ/X_39P.wav (near distance)
+
+Each file is one shot, trimmed, faded, normalised and converted to 44.1 kHz 16-bit.

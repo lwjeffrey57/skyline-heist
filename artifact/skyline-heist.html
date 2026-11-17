@@ -1,0 +1,56 @@
+<title>Skyline Heist</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d10; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #fff; }
+  [hidden] { display: none !important; }
+  canvas { display: block; }
+  #fx-dmgdir { display: none !important; } /* the weapons HUD owns the damage direction indicator */
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1.5px rgba(0,0,0,.45); pointer-events: none; }
+  #hud { position: fixed; left: 24px; bottom: 20px; pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+  #speed { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .5px; }
+  #speed small { font-size: 13px; font-weight: 500; opacity: .75; margin-left: 4px; }
+  #state { font-size: 12px; text-transform: uppercase; letter-spacing: 2px; opacity: .8; }
+  #prompt { position: fixed; left: 50%; top: 58%; transform: translateX(-50%); font-size: 15px; padding: 6px 12px; border-radius: 6px; background: rgba(10,14,18,.6); pointer-events: none; display: none; }
+  #prompt b { color: #ffc56b; }
+  #fps { position: fixed; right: 16px; top: 12px; font-size: 12px; opacity: .6; pointer-events: none; font-variant-numeric: tabular-nums; }
+  #overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(8,11,15,.72); backdrop-filter: blur(6px); cursor: pointer; }
+  #card { max-width: 520px; padding: 28px 32px; text-align: center; }
+  #card h1 { margin: 0 0 4px; font-size: 30px; letter-spacing: 3px; text-transform: uppercase; }
+  #card p.sub { margin: 0 0 20px; opacity: .7; font-size: 14px; }
+  #keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; text-align: left; font-size: 14px; margin: 0 auto 22px; width: fit-content; }
+  #keys kbd { font-family: inherit; font-weight: 600; color: #ffc56b; white-space: nowrap; }
+  #go { display: inline-block; padding: 10px 26px; border-radius: 6px; background: #ffb347; color: #1a1206; font-weight: 700; letter-spacing: 1px; }
+</style>
+
+<div id="crosshair"></div>
+<div id="hud"><div id="state">ready</div><div id="speed">0.0<small>m/s</small></div></div>
+<div id="prompt"></div>
+<div id="fps"></div>
+<div id="hud-root"></div>
+<div id="overlay">
+  <div id="card">
+    <h1>Skyline Heist</h1>
+    <p class="sub">Extraction — loot, survive, get out</p>
+    <div id="keys">
+      <kbd>W A S D</kbd><span>Move</span>
+      <kbd>Shift</kbd><span>Sprint</span>
+      <kbd>C / Ctrl</kbd><span>Crouch — slide while sprinting</span>
+      <kbd>Space</kbd><span>Jump — hold W into a ledge to climb it</span>
+      <kbd>Left / Right click</kbd><span>Fire / Aim</span>
+      <kbd>1 2 3 4 / Wheel</kbd><span>Switch between the weapons you carry</span>
+      <kbd>R</kbd><span>Reload</span>
+      <kbd>G</kbd><span>Throw frag</span>
+      <kbd>B</kbd><span>Rifle fire mode</span>
+      <kbd>E</kbd><span>Grab a zipline</span>
+      <kbd>F</kbd><span>Hold to search crates, arms lockers and dropped packs</span>
+      <kbd>H</kbd><span>Use a medkit</span>
+      <kbd>Tab</kbd><span>Show your pack</span>
+      <kbd>P / F2 / F3</kbd><span>Post-processing / quality / frame rate</span>
+      <kbd>N</kbd><span>All sound on-off</span>
+      <kbd>F4</kbd><span>Gun sound</span>
+    </div>
+    <div id="go">Click to play</div>
+  </div>
+</div>
+
+<script type="module" src="./assets/index-D4gDfHnE.js"></script>

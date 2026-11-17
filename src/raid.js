@@ -1,0 +1,566 @@
+import * as THREE from 'three';
+import { createInventory } from './inventory.js';
+
+// Extraction mode. Deploy, search crates and fallen guards for loot, reach an extraction zone and hold it
+// to bank what you carry. Die or run out of time and the backpack is lost. Banked credits buy upgrades.
+
+const RAID = { time: 480, bots: 6, botDamage: 6, botRespawn: 25, extractHold: 6, extractRadius: 3.6, protect: 4 };
+const TIERS = {
+  common: { color: '#c9d1d9', w: 60 }, uncommon: { color: '#5fd38a', w: 27 }, rare: { color: '#5aa9ff', w: 10 }, epic: { color: '#d48bff', w: 1.5 },
+};
+const ITEMS = [
+  ['Ration Tin', 'common', 12], ['Copper Spool', 'common', 15], ['Work Gloves', 'common', 18], ['Fuse Pack', 'common', 20], ['Circuit Scrap', 'common', 25], ['Cable Reel', 'common', 30],
+  ['Signal Relay', 'uncommon', 70], ['Field Dressing Case', 'uncommon', 80], ['Optic Lens', 'uncommon', 90], ['Coolant Cell', 'uncommon', 110], ['Data Slate', 'uncommon', 120],
+  ['Encrypted Drive', 'rare', 260], ['Servo Core', 'rare', 320], ['Gold Bearing', 'rare', 380],
+  ['Prototype Chip', 'epic', 900], ['Vault Bond', 'epic', 1400],
+].map(([name, tier, value]) => ({ name, tier, value }));
+// crate kinds: how many rolls, and how much the odds lean toward better tiers
+const CRATES = {
+  standard: { rolls: [2, 3], luck: 1, color: 0x6b7480, glow: 0xffb347, time: 1.0, label: 'supply crate' },
+  secure: { rolls: [2, 4], luck: 1.8, color: 0x3f5f8a, glow: 0x5aa9ff, time: 1.6, label: 'secure crate' },
+  vault: { rolls: [4, 5], luck: 4, color: 0x5c4480, glow: 0xd48bff, time: 2.6, label: 'vault case' },
+  locker: { rolls: [0, 0], luck: 1, color: 0xff6a00, glow: 0xffe9c2, time: 2.2, label: 'arms locker' },
+  bag: { rolls: [1, 2], luck: 1.4, color: 0x4a4335, glow: 0x9be37a, time: 0.5, label: 'dropped pack' },
+};
+const UPGRADES = [
+  { id: 'pack', key: 'KeyZ', label: 'Z', name: 'Expanded pack', desc: 'Carry 12 items instead of 8', cost: 1500 },
+  { id: 'medic', key: 'KeyX', label: 'X', name: 'Field medic kit', desc: 'Deploy with 3 medkits instead of 1', cost: 1000 },
+  { id: 'armor', key: 'KeyV', label: 'V', name: 'Plate carrier', desc: 'Deploy with 50 armour', cost: 2500 },
+  { id: 'suppressor', key: 'KeyC', label: 'C', name: 'Pistol suppressor', desc: 'Guards hear your pistol from a quarter of the distance', cost: 1800 },
+  { id: 'pouch', key: 'KeyB', label: 'B', name: 'Secure pouch', desc: 'Your most valuable item survives if you die', cost: 2000 },
+];
+// weapons you can own: extract with one and it joins your armoury; bring it on a raid and it is at risk
+const GUNS = [['rifle', 'Digit2', '2', 900], ['shotgun', 'Digit3', '3', 700], ['sniper', 'Digit4', '4', 1200], ['launcher', 'Digit5', '5', 1500], ['smg', 'Digit6', '6', 700], ['dmr', 'Digit7', '7', 1100], ['slug_shotgun', 'Digit8', '8', 800]];
+// Contracts: two are offered each raid; a completed one pays its bonus only if you extract.
+// count contracts tick up from events; check contracts are judged from the raid's state (live, and at extraction).
+const CONTRACTS = [
+  { id: 'lockers', text: 'Open 2 arms lockers', goal: 2, pay: 300, ev: 'loot', inc: (e) => (e.kind === 'locker' ? 1 : 0) },
+  { id: 'search', text: 'Search 8 containers', goal: 8, pay: 250, ev: 'loot', inc: () => 1 },
+  { id: 'vault', text: 'Crack a vault case', goal: 1, pay: 400, ev: 'loot', inc: (e) => (e.kind === 'vault' ? 1 : 0) },
+  { id: 'kills', text: 'Eliminate 3 guards', goal: 3, pay: 300, ev: 'kill', inc: () => 1 },
+  { id: 'heads', text: 'Get 2 headshot kills', goal: 2, pay: 350, ev: 'kill', inc: (e) => (e.headshot ? 1 : 0) },
+  { id: 'sidearm', text: 'Get 2 kills with the pistol', goal: 2, pay: 300, ev: 'kill', inc: (e) => (e.weapon === 'pistol' ? 1 : 0) },
+  { id: 'haul', text: 'Extract with a pack worth 500 cr', pay: 300, check: (s) => s.value >= 500 },
+  { id: 'rare', text: 'Extract with a rare item or better', pay: 300, check: (s) => s.pack.some((i) => i.tier === 'rare' || i.tier === 'epic') },
+  { id: 'ghost', text: 'Extract without ever being detected', pay: 500, check: (s) => !s.detected },
+  { id: 'fast', text: 'Extract within 4 minutes', pay: 300, check: (s) => s.elapsed <= 240 },
+];
+const EXITS = [[-62, 42], [62, -30], [0, -64], [62, 50], [-62, -30]];
+const SPAWNS = [[0, 50], [-48, 58], [48, 58], [-62, 20], [62, 22], [-62, -20], [62, -10], [-40, -60], [0, -60], [36, -60], [-20, 60], [26, 46]];
+const rnd = (a, b) => a + Math.random() * (b - a);
+const esc = (s) => String(s).replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+
+function loadStash() {
+  const base = { credits: 0, extracted: 0, lost: 0, best: 0, upgrades: {}, armory: {}, bring: {} };
+  let s = base;
+  try { s = { ...base, ...JSON.parse(localStorage.getItem('sh-stash') || '{}') }; } catch { /* storage unavailable */ }
+  // the page was closed or reloaded in the middle of a raid: that counts as a lost raid, so what was carried is gone
+  if (s.inRaid) { s.inRaid = false; s.lost++; s.pack = []; s.w = [null, null]; }
+  return s;
+}
+function saveStash(s) { try { localStorage.setItem('sh-stash', JSON.stringify(s)); } catch { /* storage unavailable */ } }
+
+function rollItem(luck) {
+  let total = 0; const w = {};
+  for (const [k, t] of Object.entries(TIERS)) { w[k] = k === 'common' ? t.w : t.w * luck; total += w[k]; }
+  let r = Math.random() * total, tier = 'common';
+  for (const k of Object.keys(w)) { r -= w[k]; if (r <= 0) { tier = k; break; } }
+  const pool = ITEMS.filter((i) => i.tier === tier);
+  return { ...pool[Math.floor(Math.random() * pool.length)] };
+}
+function rollContents(kind) {
+  const c = CRATES[kind], n = Math.round(rnd(c.rolls[0], c.rolls[1])), out = [];
+  for (let i = 0; i < n; i++) {
+    const r = Math.random();
+    if (r < 0.14) out.push({ supply: 'medkit', name: 'Medkit' });
+    else if (r < 0.26) out.push({ supply: 'armor', name: 'Armour plate' });
+    else if (r < 0.42) out.push({ supply: 'ammo', name: 'Ammo box' });
+    else out.push(rollItem(c.luck));
+  }
+  return out;
+}
+
+export function init(ctx) {
+  const { player, world, events, input, scene, camera } = ctx;
+  const stash = loadStash();
+  let tick = 0, tick10 = 0, reloading = false;
+  let extraMed = 0, extraArmor = 0; // supplies bought on the loadout screen for the next raid
+  let state = 'stash', timeLeft = 0, pack = [], medkits = 0, armor = 0, holdT = 0, exitT = 0, result = null, healCd = 0, target = null;
+  const packSize = () => (stash.upgrades.pack ? 12 : 8);
+  const packValue = () => pack.reduce((a, i) => a + i.value, 0);
+  player.noManualRespawn = true;
+
+  // ---- HUD ----------------------------------------------------------------
+  const style = document.createElement('style');
+  style.textContent = `
+    #rd-top { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); text-align: center; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.75); pointer-events: none; font-variant-numeric: tabular-nums; }
+    #rd-top .mode { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; opacity: .7; }
+    #rd-top .line { font-size: 15px; font-weight: 700; letter-spacing: 1px; }
+    #rd-top .line span { opacity: .6; font-weight: 500; margin: 0 6px; }
+    #rd-top .sub { margin-top: 3px; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: #7ff3ea; }
+    #rd-kit { position: fixed; left: 24px; bottom: 164px; font-size: 12px; letter-spacing: 1px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.75); pointer-events: none; }
+    #rd-kit b { color: #ffc56b; }
+    #rd-kit .bar { width: 150px; height: 4px; background: rgba(255,255,255,.18); margin-top: 4px; }
+    #rd-kit .bar i { display: block; height: 100%; background: #7fb4ff; }
+    #rd-contracts { position: fixed; left: 24px; top: 118px; font-size: 12px; letter-spacing: 1px; line-height: 1.6; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.8); pointer-events: none; }
+    #rd-contracts .h { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; opacity: .7; }
+    #rd-hold { position: fixed; left: 50%; top: 64%; transform: translateX(-50%); width: 220px; text-align: center; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.75); pointer-events: none; }
+    #rd-hold .bar { height: 5px; background: rgba(255,255,255,.2); margin-top: 6px; }
+    #rd-hold .bar i { display: block; height: 100%; background: #9be37a; width: 0; }
+    #rd-toasts { position: fixed; left: 50%; top: 70%; transform: translateX(-50%); text-align: center; font-size: 13px; letter-spacing: 1px; text-shadow: 0 1px 3px rgba(0,0,0,.8); pointer-events: none; }
+    #rd-toasts div { margin-top: 3px; transition: opacity .5s; }
+    .rd-mark { position: fixed; transform: translate(-50%, -50%); text-align: center; font-size: 11px; letter-spacing: 1px; color: #9be37a; text-shadow: 0 1px 3px rgba(0,0,0,.8); pointer-events: none; font-variant-numeric: tabular-nums; }
+    .rd-mark i { display: block; width: 12px; height: 12px; margin: 0 auto 3px; border: 2px solid #9be37a; transform: rotate(45deg); }
+    #rd-panel { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+    #rd-panel .box { min-width: 420px; max-width: 520px; padding: 22px 26px; background: rgba(8,11,15,.86); border: 1px solid rgba(255,255,255,.14); color: #fff; }
+    #rd-panel h2 { margin: 0 0 4px; font-size: 20px; letter-spacing: 3px; text-transform: uppercase; }
+    #rd-panel p { margin: 0 0 12px; font-size: 12px; letter-spacing: 1px; opacity: .75; }
+    #rd-panel table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+    #rd-panel td { padding: 5px 6px; border-top: 1px solid rgba(255,255,255,.08); }
+    #rd-panel td:last-child { text-align: right; }
+    #rd-panel kbd { font-family: inherit; font-weight: 700; color: #ffc56b; }
+    #rd-panel .go { margin-top: 14px; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: #ffc56b; }
+    #rd-panel .dim { opacity: .5; }`;
+  document.head.appendChild(style);
+  const el = (id, html = '') => { const d = document.createElement('div'); d.id = id; d.innerHTML = html; ctx.hud.appendChild(d); return d; };
+  const top = el('rd-top', '<div class="mode">Extraction</div><div class="line"></div><div class="sub" hidden></div>');
+  const kit = el('rd-kit'), hold = el('rd-hold', '<span></span><div class="bar"><i></i></div>'), toasts = el('rd-toasts'), panel = el('rd-panel');
+  const cbox = el('rd-contracts'); cbox.hidden = true;
+  hold.hidden = true; panel.hidden = true;
+  const line = top.querySelector('.line'), sub = top.querySelector('.sub');
+  function toast(html, color = '#fff') {
+    const d = document.createElement('div'); d.innerHTML = html; d.style.color = color; toasts.prepend(d);
+    while (toasts.children.length > 5) toasts.lastChild.remove();
+    setTimeout(() => { d.style.opacity = '0'; }, 2600); setTimeout(() => d.remove(), 3200);
+  }
+
+  // ---- small interface sounds (routed through the game's master volume, so N still mutes them) ------
+  function chime(notes, gap = 0.07, len = 0.16, vol = 0.16, type = 'triangle') {
+    const dbg = ctx.audio && ctx.audio.debug, ac = dbg && dbg.context, G = dbg && dbg.graph;
+    if (!ac || !G || !G.master || ac.state !== 'running') return;
+    notes.forEach((f, i) => {
+      const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + i * gap;
+      o.type = type; o.frequency.value = f;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0008, t + len);
+      o.connect(g); g.connect(G.master); o.start(t); o.stop(t + len + 0.02);
+    });
+  }
+  const TIER_SOUND = { common: [[620]], uncommon: [[620, 830]], rare: [[620, 830, 1110], 0.07, 0.24, 0.2], epic: [[620, 830, 1110, 1480, 1860], 0.08, 0.4, 0.24] };
+  let contracts = [], detected = false;
+  let keycards = 0, phase = 0, lateExit = false, exitSec = 0; // keycards open vault cases; the raid escalates in phases
+  let reveal = null; // the container being emptied, one item at a time
+  const brought = new Set(); let broughtMed = 0, menu = null; // weapons and medkits taken in from the loadout
+  const raidGuns = new Set(); // weapons carried this raid (brought or found): kept on extraction, lost otherwise
+
+  // ---- lootables ----------------------------------------------------------
+  const lootables = [];
+  const geoLocker = new THREE.BoxGeometry(0.85, 1.85, 0.5), geoLockerStrip = new THREE.BoxGeometry(0.88, 0.07, 0.53), geoLockerDoor = new THREE.BoxGeometry(0.03, 1.6, 0.03);
+  const geoBody = new THREE.BoxGeometry(0.9, 0.5, 0.6), geoLid = new THREE.BoxGeometry(0.94, 0.1, 0.64), geoStrip = new THREE.BoxGeometry(0.93, 0.09, 0.63), geoBag = new THREE.BoxGeometry(0.5, 0.34, 0.36);
+  const matCache = {};
+  const mats = (kind) => (matCache[kind] ||= {
+    body: new THREE.MeshStandardMaterial({ color: CRATES[kind].color, roughness: 0.6, metalness: 0.4 }),
+    glow: new THREE.MeshStandardMaterial({ color: 0x111111, emissive: CRATES[kind].glow, emissiveIntensity: 3 }),
+    dead: new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 }),
+  });
+  function addLootable(kind, x, y, z, yaw = 0, contents = null) {
+    const m = mats(kind), g = new THREE.Group();
+    if (kind === 'locker') {
+      const cab = new THREE.Mesh(geoLocker, m.body); cab.position.y = 0.925; cab.castShadow = true; cab.receiveShadow = true; g.add(cab);
+      const seam = new THREE.Mesh(geoLockerDoor, m.dead); seam.position.set(0, 0.9, 0.255); g.add(seam);
+      const band = new THREE.Mesh(geoLockerStrip, m.glow); band.position.y = 1.62; g.add(band);
+      g.position.set(x, y, z); g.rotation.y = yaw; scene.add(g);
+      const L = { kind, group: g, lid: null, strip: band, items: contents || [], opened: false, pos: g.position, born: ctx.time, vy: 0 };
+      lootables.push(L); return L;
+    }
+    const body = new THREE.Mesh(kind === 'bag' ? geoBag : geoBody, m.body); body.position.y = kind === 'bag' ? 0.17 : 0.25;
+    body.castShadow = true; body.receiveShadow = true; g.add(body);
+    let lid = null;
+    if (kind !== 'bag') { lid = new THREE.Mesh(geoLid, m.body); lid.position.set(0, 0.55, 0); lid.castShadow = true; g.add(lid); }
+    const strip = new THREE.Mesh(geoStrip, m.glow); strip.position.y = kind === 'bag' ? 0.3 : 0.4; if (kind === 'bag') strip.scale.set(0.56, 0.6, 0.6); g.add(strip);
+    g.position.set(x, y, z); g.rotation.y = yaw; scene.add(g);
+    const L = { kind, group: g, lid, strip, items: rollContents(kind), opened: false, pos: g.position, born: ctx.time, vy: 0 };
+    lootables.push(L); return L;
+  }
+  function clearLootables() { for (const L of lootables) L.group.removeFromParent(); lootables.length = 0; }
+  const down = new THREE.Vector3(0, -1, 0), probe = new THREE.Vector3();
+  function floorBelow(x, y, z) { probe.set(x, y + 0.6, z); const h = world.raycast(probe, down, 60); return h ? h.point.y : 0; }
+
+  function placeCrates() {
+    clearLootables();
+    const spots = [];
+    for (const b of world.buildings) {
+      const ix = b.w / 2 - 1.6, iz = b.d / 2 - 1.6;
+      for (let f = 0; f < b.floors; f++) {
+        const y = f * b.floorHeight, kind = f === 0 ? 'standard' : 'secure';
+        for (const [sx, sz] of [[-1, -1], [1, 1], [-1, 1], [1, -1]]) if (Math.random() < (f === 0 ? 0.28 : 0.32)) spots.push([kind, b.x + sx * ix, y, b.z + sz * iz]);
+      }
+      spots.push([b.floors >= 3 ? 'vault' : 'secure', b.x + rnd(-2, 2), b.roofY, b.z - b.d / 2 + 2.2, true]);
+    }
+    for (const [x, z] of [[-9, 26], [44, 9], [-54, 5], [10, -44], [-10, -40], [52, -46], [-56, -36], [3, 4.5], [-4.5, -3], [30, 40], [-40, 12], [20, -4]]) spots.push(['standard', x, 0, z]);
+    // arms lockers: one on the top floor of five random buildings, each holding a weapon you did not deploy with
+    const found = ['rifle', 'shotgun', 'sniper', 'launcher', 'smg', 'dmr', 'slug_shotgun'].sort(() => Math.random() - 0.5);
+    world.buildings.slice().sort(() => Math.random() - 0.5).slice(0, 5).forEach((b, i) => {
+      const y = (b.floors - 1) * b.floorHeight, x = b.x + (b.w / 2 - 1.6) * 0.55, z = b.z + b.d / 2 - 0.75;
+      if (!player.free(x, y + 0.1, z, 1.8)) return;
+      const items = [{ weapon: found[i] }, { supply: 'ammoFull', name: 'Ammo' }];
+      if (Math.random() < 0.5) items.push({ supply: 'armor', name: 'Armour plate' });
+      addLootable('locker', x, floorBelow(x, y + 0.4, z), z, Math.PI, items);
+    });
+    // every raid has at least one vault case: if no tall building rolled one, a rooftop crate is promoted
+    if (!spots.some((s) => s[0] === 'vault')) { const roofs = spots.filter((s) => s[4]); if (roofs.length) roofs[Math.floor(Math.random() * roofs.length)][0] = 'vault'; }
+    for (const [kind, x, y, z] of spots) {
+      if (!player.free(x, y + 0.75, z, 0.5)) continue; // something solid is in the way
+      const L = addLootable(kind, x, floorBelow(x, y + 0.4, z), z, Math.random() * Math.PI);
+      if (kind === 'vault') { L.locked = true; if (Math.random() < 0.25) L.items.push({ name: 'Black Ledger', tier: 'epic', value: 2500 }); }
+    }
+    // vault cases are locked: one keycard is hidden in a secure crate (heavies and marksmen sometimes carry one too)
+    const secure = lootables.filter((L) => L.kind === 'secure');
+    if (secure.length) secure[Math.floor(Math.random() * secure.length)].items.push({ supply: 'key', name: 'Keycard' });
+  }
+
+  function take(item) {
+    if (item.weapon) {
+      const slot = ctx.weapons && ctx.weapons.inventory.find((v) => v.def.id === item.weapon);
+      if (!slot) return true;
+      if (slot.locked) { slot.locked = false; slot.mag = slot.def.mag; slot.reserve = slot.def.reserve; raidGuns.add(item.weapon); chime([415, 520, 620, 830], 0.06, 0.3, 0.2, 'square'); toast(`+ ${esc(slot.def.name)} <span style="opacity:.7">weapon — extract to keep it</span>`, '#ff8a3c'); }
+      else { slot.reserve = slot.def.reserve; toast(`+ ${esc(slot.def.name)} ammo`, '#ffc56b'); }
+      return true;
+    }
+    if (item.supply === 'ammoFull') { if (ctx.weapons && ctx.weapons.addAmmo) ctx.weapons.addAmmo(1); return true; }
+    if (item.supply === 'key') { keycards++; chime([880, 1175, 1568], 0.07, 0.3, 0.2); toast('+ Keycard <span style="opacity:.7">opens a vault case</span>', '#d48bff'); return true; }
+    if (item.supply) chime([440], 0.05, 0.1, 0.12, 'square');
+    if (item.supply === 'medkit') { if (medkits >= 4) return false; medkits++; toast('+ Medkit', '#9be37a'); return true; }
+    if (item.supply === 'armor') { if (armor >= 100) return false; armor = Math.min(100, armor + 40); toast('+ Armour plate', '#7fb4ff'); return true; }
+    if (item.supply === 'ammo') { if (ctx.weapons && ctx.weapons.addAmmo) ctx.weapons.addAmmo(0.35); toast('+ Ammo', '#ffc56b'); return true; }
+    const color = TIERS[item.tier].color;
+    chime(...TIER_SOUND[item.tier]);
+    if (pack.length < packSize()) { pack.push(item); toast(`+ ${esc(item.name)} <span style="opacity:.7">${item.value} cr</span>`, color); return true; }
+    // full: swap out the least valuable thing carried if this is worth more
+    let worst = 0; for (let i = 1; i < pack.length; i++) if (pack[i].value < pack[worst].value) worst = i;
+    if (pack[worst].value >= item.value) return false;
+    toast(`+ ${esc(item.name)} <span style="opacity:.7">${item.value} cr — dropped ${esc(pack[worst].name)}</span>`, color);
+    pack[worst] = item; return true;
+  }
+  // opening a container starts a reveal: items come out one at a time (see update), best saved for last
+  function search(L) {
+    L.busy = true; chime([300, 380], 0.05, 0.12, 0.12, 'square');
+    const order = { common: 0, uncommon: 1, rare: 2, epic: 3 };
+    const queue = L.items.slice().sort((p, q) => (p.tier ? order[p.tier] + 1 : 0) - (q.tier ? order[q.tier] + 1 : 0));
+    reveal = { L, queue, left: [], t: 0.25, total: queue.length };
+    L.items = [];
+  }
+  function finishReveal() {
+    const { L, left } = reveal; reveal = null; L.busy = false; L.items = left;
+    if (left.length) toast('Pack full — left the cheaper items behind', '#ff8a70');
+    else { L.opened = true; L.strip.material = mats(L.kind).dead; if (L.lid) { L.lid.rotation.z = 0.9; L.lid.position.set(-0.36, 0.72, 0); } if (L.kind === 'bag') L.group.visible = false; }
+    events.emit('lootTaken', { kind: L.kind });
+  }
+
+  // ---- contracts ----------------------------------------------------------
+  function rollContracts() {
+    const pool = CONTRACTS.slice().sort(() => Math.random() - 0.5);
+    contracts = pool.slice(0, 2).map((def) => ({ def, n: 0, done: false }));
+  }
+  const raidState = () => ({ value: packValue(), pack, detected, elapsed: RAID.time - timeLeft });
+  const met = (c) => (c.def.check ? c.def.check(raidState()) : c.n >= c.def.goal);
+  function contractTick(ev, e) {
+    if (state !== 'raid') return;
+    for (const c of contracts) {
+      if (c.def.ev !== ev || c.n >= c.def.goal) continue;
+      c.n = Math.min(c.def.goal, c.n + c.def.inc(e));
+      if (c.n >= c.def.goal) { toast(`Contract complete — ${esc(c.def.text)} <span style="opacity:.7">+${c.def.pay} cr on extraction</span>`, '#ffc56b'); chime([520, 780, 1040], 0.08, 0.3, 0.2); }
+    }
+  }
+  events.on('lootTaken', (e) => contractTick('loot', e));
+  events.on('botDied', (e) => { if (e.by === player) contractTick('kill', { headshot: !!e.headshot, weapon: ctx.weapons && ctx.weapons.current ? ctx.weapons.current.def.id : '' }); });
+  events.on('guardAlert', () => { if (state === 'raid') detected = true; });
+  const contractRows = (final) => contracts.map((c) => {
+    const ok = final ? c.done : met(c), prog = c.def.goal > 1 ? ` <span style="opacity:.6">${c.n}/${c.def.goal}</span>` : '';
+    return `<div style="color:${ok ? '#9be37a' : '#fff'}">${ok ? '✔' : '◻'} ${esc(c.def.text)}${prog} <span style="opacity:.6">+${c.def.pay}</span></div>`;
+  }).join('');
+  rollContracts();
+
+  // ---- extraction zones ---------------------------------------------------
+  const zones = EXITS.map(([x, z]) => {
+    const g = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(RAID.extractRadius, 0.08, 8, 64), new THREE.MeshBasicMaterial({ color: 0x9be37a }));
+    ring.rotation.x = Math.PI / 2; ring.position.y = 0.06; g.add(ring);
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 60, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0x9be37a, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, fog: false }));
+    beam.position.y = 30; g.add(beam);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(RAID.extractRadius, 48), new THREE.MeshBasicMaterial({ color: 0x9be37a, transparent: true, opacity: 0.1, depthWrite: false }));
+    disc.rotation.x = -Math.PI / 2; disc.position.y = 0.03; g.add(disc);
+    g.position.set(x, 0, z); g.visible = false; scene.add(g);
+    const mark = document.createElement('div'); mark.className = 'rd-mark'; mark.innerHTML = '<i></i><span></span>'; mark.hidden = true; ctx.hud.appendChild(mark);
+    return { x, z, group: g, ring, active: false, mark, label: mark.querySelector('span') };
+  });
+
+  // ---- armour & supplies --------------------------------------------------
+  const rawDamage = player.takeDamage.bind(player);
+  player.takeDamage = (amount, info) => {
+    if (state === 'raid' && armor > 0 && !(player.protectT > 0)) { const a = Math.min(armor, amount * 0.6); armor -= a; amount -= a; }
+    rawDamage(amount, info);
+  };
+
+  // ---- flow ---------------------------------------------------------------
+  function setBots(on) {
+    if (!ctx.bots) return;
+    const c = ctx.bots.config; c.ffa = false; c.damage = RAID.botDamage; c.respawnDelay = RAID.botRespawn; c.maxAttackers = 2;
+    ctx.bots.setCount(on ? RAID.bots : 0);
+    if (on && ctx.bots.respawnAll) ctx.bots.respawnAll();
+  }
+  function deploy() {
+    detected = false; for (const c of contracts) { c.n = 0; c.done = false; }
+    keycards = 0; phase = 0; lateExit = false; exitSec = 0;
+    state = 'raid'; timeLeft = RAID.time; pack = []; holdT = 0; exitT = 0; result = null; reveal = null; raidGuns.clear();
+    // everything in the pack comes along: supplies are put to use, valuables ride in the pack (and are at risk)
+    medkits = baseMed(); armor = baseArmor(); broughtMed = 0; brought.clear();
+    for (const it of stash.pack || []) {
+      if (!it) continue;
+      if (it.t === 'med') { medkits++; broughtMed++; } else if (it.t === 'plate') armor = Math.min(100, armor + 50);
+      else if (it.t === 'loot') pack.push({ name: it.name, tier: it.tier, value: it.value });
+    }
+    stash.pack = (stash.pack || []).map(() => null); stash.inRaid = true;
+    const free = SPAWNS.filter(([x, z]) => player.free(x, 0.01, z, 1.8));
+    const [sx, sz] = free[Math.floor(Math.random() * free.length)] || SPAWNS[0];
+    world.spawn.set(sx, 0, sz); world.spawnYaw = Math.atan2(sx, sz);
+    // the two exits farthest from where you start, so every raid means crossing the map
+    const order = zones.slice().sort((a, b) => Math.hypot(b.x - sx, b.z - sz) - Math.hypot(a.x - sx, a.z - sz));
+    zones.forEach((zn) => { zn.active = order.indexOf(zn) < 2; zn.group.visible = zn.active; });
+    player.protectTime = RAID.protect; player.respawn();
+    if (ctx.weapons) { // deploy with the sidearm only; everything else comes from arms lockers
+      const inv = ctx.weapons.inventory, start = inv.some((v) => v.def.id === 'pistol') ? 'pistol' : 'rifle';
+      for (const v of inv) { v.locked = v.def.id !== start; v.mag = v.def.mag; v.reserve = v.def.reserve; }
+      const sidearm = inv.find((v) => v.def.id === 'pistol'); if (sidearm) sidearm.def.suppressed = !!stash.upgrades.suppressor;
+      // weapons chosen on the stash screen leave the armoury now; they only come back if you extract
+      for (const it of stash.w || []) { const slot = it && inv.find((v) => v.def.id === it.id); if (slot) { slot.locked = false; brought.add(it.id); } }
+      saveStash(stash);
+      ctx.weapons.switchTo(inv.findIndex((v) => v.def.id === start), true);
+    }
+    placeCrates(); setBots(true);
+    panel.hidden = true; if (menu) menu.hide();
+    events.emit('raidStart', {});
+  }
+  function endRaid(kind) {
+    if (state !== 'raid') return;
+    const value = packValue();
+    const nameOf = (id) => { const s = ctx.weapons && ctx.weapons.inventory.find((v) => v.def.id === id); return s ? s.def.name : id; };
+    const items = pack.slice().sort((a, b) => b.value - a.value), guns = [...raidGuns].filter((id) => !brought.has(id)).map(nameOf);
+    result = { kind, value, items, guns, saved: null, bonus: 0 };
+    for (const c of contracts) c.done = kind === 'extracted' && met(c);
+    stash.inRaid = false;
+    if (kind === 'extracted') {
+      result.bonus = contracts.reduce((a, c) => a + (c.done ? c.def.pay : 0), 0); stash.credits += result.bonus;
+      stash.extracted++; stash.best = Math.max(stash.best, value);
+      // the haul stays in your pack for you to sort; unused medkits you brought come back; found weapons go to the stash
+      const back = items.map((i) => ({ t: 'loot', name: i.name, tier: i.tier, value: i.value }));
+      for (let n = Math.min(broughtMed, Math.max(0, medkits - baseMed())); n > 0; n--) back.push({ t: 'med' });
+      stash.pack = back; menu.normalise();
+      for (const extra of stash.pack.splice(packSize())) if (extra) menu.addToStash(extra);
+      for (const id of raidGuns) if (!brought.has(id)) menu.addToStash({ t: 'weapon', id });
+      chime([520, 660, 780, 1040, 1320], 0.09, 0.45, 0.2);
+    } else {
+      stash.lost++; stash.pack = []; stash.w = [null, null];
+      if (stash.upgrades.pouch && items.length) { result.saved = items[0]; menu.addToStash({ t: 'loot', name: items[0].name, tier: items[0].tier, value: items[0].value }); }
+      result.guns = [...new Set([...raidGuns, ...brought])].map(nameOf);
+      menu.normalise();
+      chime([330, 262, 196], 0.14, 0.4, 0.16, 'sawtooth');
+    }
+    raidGuns.clear(); reveal = null;
+    saveStash(stash);
+    state = 'result'; pack = []; setBots(false);
+    zones.forEach((zn) => { zn.group.visible = false; zn.mark.hidden = true; });
+    hold.hidden = true; clearLootables();
+    events.emit('raidEnd', { kind, value });
+  }
+  events.on('playerDied', () => endRaid('kia'));
+  events.on('botDied', (e) => {
+    if (state !== 'raid' || !e.point) return;
+    // tougher enemy types carry better loot
+    const rich = e.bot && (e.bot.kind === 'heavy' || e.bot.kind === 'marksman');
+    const L = addLootable('bag', e.point.x + rnd(-0.4, 0.4), floorBelow(e.point.x, e.point.y, e.point.z), e.point.z + rnd(-0.4, 0.4), Math.random() * 3);
+    if (rich) { L.items = rollContents('secure'); if (Math.random() < 0.35) L.items.push({ supply: 'key', name: 'Keycard' }); }
+  });
+  events.on('shot', (e) => { if (e.by === player && state === 'raid') player.protectT = 0; });
+
+  function renderStash() {
+    const ups = UPGRADES.map((u) => {
+      const owned = !!stash.upgrades[u.id], can = stash.credits >= u.cost;
+      return `<tr class="${owned ? 'dim' : ''}"><td><kbd>${u.label}</kbd></td><td>${u.name}<br><span style="opacity:.6;font-size:11px">${u.desc}</span></td><td>${owned ? 'Owned' : `${u.cost} cr${can ? '' : ' <span style="opacity:.5">(short)</span>'}`}</td></tr>`;
+    }).join('');
+    const guns = GUNS.map(([id, , label, cost]) => {
+      const slot = ctx.weapons && ctx.weapons.inventory.find((v) => v.def.id === id); if (!slot) return '';
+      const n = stash.armory[id] || 0;
+      return `<tr><td><kbd>${label}</kbd></td><td>${esc(slot.def.name)} <span style="opacity:.6">× ${n} owned</span></td><td>Buy ${cost} cr${stash.credits >= cost ? '' : ' <span style="opacity:.5">(short)</span>'}</td></tr>`;
+    }).join('');
+    panel.innerHTML = `<div class="box"><h2>Stash</h2><p>${stash.credits} credits banked · ${stash.extracted} extractions · ${stash.lost} raids lost · best haul ${stash.best} cr</p>
+      <p style="margin:10px 0 4px;letter-spacing:2px;text-transform:uppercase;font-size:10px">Weapon shop — press the number to buy one</p>
+      <table>${guns}</table>
+      <p style="margin:12px 0 4px;letter-spacing:2px;text-transform:uppercase;font-size:10px">Upgrades</p>
+      <table>${ups}</table>
+      <p style="margin-top:12px">Weapons found in orange arms lockers join your armoury if you extract with them. Hold <kbd>F</kbd> to search, <kbd>H</kbd> uses a medkit, <kbd>Tab</kbd> shows your pack.</p>
+      <div class="go">Press Enter to choose your loadout</div></div>`;
+  }
+  // Loadout: what you carry into this raid. Everything chosen here is at risk.
+  const SUPPLIES = { med: { key: 'KeyH', label: 'H', name: 'Extra medkit', cost: 150, max: 4 }, plate: { key: 'KeyT', label: 'T', name: 'Armour plate (+50)', cost: 300, max: 100 } };
+  const baseMed = () => (stash.upgrades.medic ? 3 : 1), baseArmor = () => (stash.upgrades.armor ? 50 : 0);
+  function renderLoadout() {
+    let risk = 0;
+    const guns = GUNS.map(([id, , label, cost]) => {
+      const slot = ctx.weapons && ctx.weapons.inventory.find((v) => v.def.id === id); if (!slot) return '';
+      const n = stash.armory[id] || 0, bring = n > 0 && stash.bring[id];
+      if (bring) risk += cost;
+      const right = n === 0 ? '<span style="opacity:.5">None owned</span>' : bring ? '<span style="color:#ff8a3c">Bringing</span>' : 'Leaving in the stash';
+      return `<tr class="${n === 0 ? 'dim' : ''}"><td><kbd>${label}</kbd></td><td>${esc(slot.def.name)} <span style="opacity:.6">× ${n}</span></td><td>${right}</td></tr>`;
+    }).join('');
+    const med = baseMed() + extraMed, arm = baseArmor() + extraArmor;
+    const pistol = ctx.weapons && ctx.weapons.inventory.find((v) => v.def.id === 'pistol');
+    panel.innerHTML = `<div class="box"><h2>Loadout</h2><p>${stash.credits} credits · weapons at risk worth ${risk} cr</p>
+      <p style="margin:10px 0 4px;letter-spacing:2px;text-transform:uppercase;font-size:10px">Weapons — press the number to bring or leave</p>
+      <table><tr><td><kbd>1</kbd></td><td>${pistol ? esc(pistol.def.name) : 'Pistol'}</td><td>Always carried</td></tr>${guns}</table>
+      <p style="margin:12px 0 4px;letter-spacing:2px;text-transform:uppercase;font-size:10px">Supplies for this raid</p>
+      <table>
+        <tr><td><kbd>H</kbd></td><td>Medkits <span style="opacity:.6">× ${med}</span></td><td>${med >= SUPPLIES.med.max ? 'Full' : `Buy one ${SUPPLIES.med.cost} cr`}</td></tr>
+        <tr><td><kbd>T</kbd></td><td>Armour <span style="opacity:.6">${arm}</span></td><td>${arm >= SUPPLIES.plate.max ? 'Full' : `Add a plate ${SUPPLIES.plate.cost} cr`}</td></tr>
+        <tr><td></td><td>Pack</td><td>${packSize()} slots${stash.upgrades.pouch ? ' · secure pouch' : ''}</td></tr>
+      </table>
+      <p style="margin:12px 0 4px;letter-spacing:2px;text-transform:uppercase;font-size:10px">Contracts — paid if you extract</p>
+      <div style="font-size:13px;line-height:1.6">${contractRows(false)}</div>
+      <div class="go">Enter to deploy · Backspace to return to the stash</div></div>`;
+  }
+  function renderResult() {
+    const t = { extracted: ['Extracted', `Haul worth ${result.value} credits is in your pack — store or sell it in the stash`], kia: ['Killed in action', `Lost a pack worth ${result.value} credits`], mia: ['Missing in action', `Time ran out — lost a pack worth ${result.value} credits`] }[result.kind];
+    const rows = result.items.map((i) => `<tr><td style="color:${TIERS[i.tier].color}">${esc(i.name)}${result.saved === i ? ' <span style="color:#9be37a">— saved by the secure pouch, sent to your stash</span>' : ''}</td><td>${i.value} cr</td></tr>`).join('') || '<tr><td class="dim">Empty pack</td><td></td></tr>';
+    const guns = result.guns.length ? `<p style="margin-top:10px;color:${result.kind === 'extracted' ? '#9be37a' : '#ff8a70'}">${result.kind === 'extracted' ? 'Weapons found — sent to your stash' : 'Weapons lost'}: ${result.guns.map(esc).join(', ')}</p>` : '';
+    panel.innerHTML = `<div class="box"><h2>${t[0]}</h2><p>${t[1]}</p><table>${rows}</table>${guns}<p style="margin:12px 0 4px;letter-spacing:2px;text-transform:uppercase;font-size:10px">Contracts${result.bonus ? ` — bonus ${result.bonus} cr` : ''}</p><div style="font-size:13px;line-height:1.6">${contractRows(true)}</div><div class="go">Press Enter — a new map layout loads, then click to continue</div></div>`;
+  }
+  function renderPack() {
+    const rows = pack.slice().sort((a, b) => b.value - a.value).map((i) => `<tr><td style="color:${TIERS[i.tier].color}">${esc(i.name)}</td><td>${i.value} cr</td></tr>`).join('') || '<tr><td class="dim">Nothing yet</td><td></td></tr>';
+    panel.innerHTML = `<div class="box"><h2>Pack ${pack.length}/${packSize()}</h2><p>Worth ${packValue()} credits if you get out</p><table>${rows}</table></div>`;
+  }
+
+  const v = new THREE.Vector3(), fwd = new THREE.Vector3();
+  function updateMarkers() {
+    camera.getWorldDirection(fwd);
+    for (const zn of zones) {
+      if (!zn.active || state !== 'raid') { zn.mark.hidden = true; continue; }
+      v.set(zn.x, 2.2, zn.z);
+      const dist = Math.hypot(zn.x - player.pos.x, zn.z - player.pos.z);
+      const behind = v.clone().sub(camera.position).dot(fwd) < 0;
+      v.project(camera);
+      let sx = v.x, sy = v.y;
+      if (behind) { sx = THREE.MathUtils.clamp(-sx, -0.45, 0.45); sy = -1; }
+      sx = THREE.MathUtils.clamp(sx, -0.92, 0.92); sy = THREE.MathUtils.clamp(sy, -0.55, 0.8);
+      zn.mark.style.left = `${(sx * 0.5 + 0.5) * 100}%`; zn.mark.style.top = `${(-sy * 0.5 + 0.5) * 100}%`;
+      zn.label.textContent = `EXIT ${Math.round(dist)}m`; zn.mark.hidden = false;
+      zn.ring.scale.setScalar(1 + Math.sin(ctx.time * 3) * 0.02);
+    }
+  }
+
+  menu = createInventory(ctx, {
+    stash, save: () => saveStash(stash), GUNS, UPGRADES, packSize, chime,
+    contractsHtml: () => contractRows(false),
+    onDeploy: () => { deploy(); const o = document.getElementById('overlay'); if (o) o.click(); }, // the click also captures the mouse
+  });
+  ctx.raid = { menu, config: RAID, stash, get state() { return state; }, get pack() { return pack; }, get timeLeft() { return timeLeft; }, set timeLeft(t) { timeLeft = t; }, lootables, zones, deploy, endRaid, get armor() { return armor; }, get contracts() { return contracts; }, get keycards() { return keycards; }, set keycards(n) { keycards = n; }, get phase() { return phase; }, setContracts(ids) { contracts = ids.map((id) => ({ def: CONTRACTS.find((c) => c.id === id), n: 0, done: false })); }, get medkits() { return medkits; } };
+  setBots(false); player.protectT = 1e9;
+  panel.hidden = true; menu.show(); saveStash(stash);
+
+  return {
+    update(dt) {
+      if (state !== 'raid') {
+        player.protectT = 1e9; top.hidden = true; kit.hidden = true; hold.hidden = true; panel.hidden = false; cbox.hidden = true;
+        if (state === 'stash') {
+          // the stash is a mouse-driven screen: release the pointer and show it
+          panel.hidden = true; menu.show();
+          if (document.pointerLockElement) document.exitPointerLock();
+        } else {
+          renderResult();
+          if (input.pressed.has('Enter') && !reloading) {
+            // a fresh page load rolls a new map layout (and repairs everything that was blown up)
+            reloading = true;
+            setTimeout(() => { reloading = false; state = 'stash'; rollContracts(); }, 2500); // if the reload is blocked, carry on with this layout
+            try { location.reload(); } catch { reloading = false; state = 'stash'; }
+          }
+        }
+        return;
+      }
+      top.hidden = false; kit.hidden = false; cbox.hidden = false;
+      if (tick10++ % 10 === 0) cbox.innerHTML = `<div class="h">Contracts</div>${contractRows(false)}`;
+      timeLeft -= dt; healCd -= dt;
+      if (timeLeft <= 0) { endRaid('mia'); return; }
+
+      // medkit
+      if (input.pressed.has('KeyH') && medkits > 0 && healCd <= 0 && player.hp < player.maxHp) { medkits--; healCd = 1; player.hp = Math.min(player.maxHp, player.hp + 60); toast('Medkit used', '#9be37a'); }
+
+      // loot that lost its floor falls to the next one down
+      tick++;
+      for (let i = 0; i < lootables.length; i++) {
+        const L = lootables[i];
+        if (L.vy === 0 && (tick + i) % 20) continue; // resting loot only re-checks its floor now and then
+        const fy = floorBelow(L.pos.x, L.pos.y, L.pos.z);
+        if (L.pos.y > fy + 0.02) { L.vy -= 24 * dt; L.pos.y = Math.max(fy, L.pos.y + L.vy * dt); } else { L.vy = 0; L.pos.y = fy; }
+        if (L.kind === 'bag' && !L.opened && ctx.time - L.born > 90) { L.opened = true; L.group.visible = false; }
+      }
+
+      // searching: nearest unopened container within reach, roughly in front of you
+      camera.getWorldDirection(fwd); target = null; let best = 2.4;
+      for (const L of lootables) {
+        if (L.opened || L.busy) continue;
+        v.set(L.pos.x - player.pos.x, 0, L.pos.z - player.pos.z); const d = v.length();
+        if (d > best || Math.abs(L.pos.y - player.pos.y) > 1.6) continue;
+        if (d > 0.8 && v.normalize().dot(fwd) < 0.2) continue;
+        best = d; target = L;
+      }
+      if (reveal) {
+        reveal.t -= dt;
+        if (reveal.t <= 0) {
+          const it = reveal.queue.shift();
+          if (it && !take(it)) reveal.left.push(it);
+          reveal.t = it && (it.tier === 'rare' || it.tier === 'epic') ? 0.5 : 0.3;
+          if (!reveal.queue.length) finishReveal();
+        }
+      }
+      const lockedOut = target && target.locked && keycards <= 0;
+      if (target && !lockedOut && input.down('KeyF')) {
+        holdT += dt;
+        if (holdT >= CRATES[target.kind].time) { if (target.locked) { target.locked = false; keycards--; toast('Keycard used', '#d48bff'); } search(target); holdT = 0; }
+      } else holdT = 0;
+      if (target && !player.prompt) player.prompt = lockedOut ? 'Vault case locked — needs a <b>keycard</b>' : `Hold <b>F</b> — ${target.locked ? 'use keycard on' : 'search'} ${CRATES[target.kind].label}`;
+
+      // extraction
+      let inZone = false;
+      for (const zn of zones) if (zn.active && Math.hypot(zn.x - player.pos.x, zn.z - player.pos.z) < RAID.extractRadius && player.pos.y < 2) inZone = true;
+      exitT = inZone ? exitT + dt : 0;
+      // the extraction countdown is audible, rising as it nears the end
+      if (inZone && Math.floor(exitT) >= exitSec) { chime([440 + exitSec * 90], 0.05, 0.14, 0.16, 'square'); exitSec++; } else if (!inZone) exitSec = 0;
+      // the longer you stay, the more guards arrive, and they are replaced faster
+      const elapsed = RAID.time - timeLeft;
+      if (ctx.bots && phase === 0 && elapsed > 180) { phase = 1; ctx.bots.config.respawnDelay = 16; ctx.bots.setCount(RAID.bots + 1); toast('Reinforcements inbound', '#ff8a70'); chime([220, 196], 0.18, 0.4, 0.18, 'sawtooth'); }
+      if (ctx.bots && phase === 1 && elapsed > 320) { phase = 2; ctx.bots.config.respawnDelay = 9; ctx.bots.setCount(RAID.bots + 2); toast('Lockdown — the site is filling with guards', '#ff5a4a'); chime([220, 196, 165], 0.18, 0.5, 0.2, 'sawtooth'); }
+      // with three minutes left an emergency exit opens at the spare zone nearest to you
+      if (!lateExit && timeLeft < 180) {
+        lateExit = true;
+        const spare = zones.filter((zn) => !zn.active).sort((a, b) => Math.hypot(a.x - player.pos.x, a.z - player.pos.z) - Math.hypot(b.x - player.pos.x, b.z - player.pos.z))[0];
+        if (spare) { spare.active = true; spare.group.visible = true; toast('Emergency exit open', '#9be37a'); chime([660, 880], 0.1, 0.3, 0.18); }
+      }
+      if (exitT >= RAID.extractHold) { endRaid('extracted'); return; }
+
+      const showBar = inZone || holdT > 0 || !!reveal;
+      hold.hidden = !showBar;
+      if (showBar) {
+        hold.firstChild.textContent = inZone ? `Extracting ${(RAID.extractHold - exitT).toFixed(1)}s` : holdT > 0 ? 'Searching' : 'Looting';
+        const frac = inZone ? exitT / RAID.extractHold : holdT > 0 && target ? holdT / CRATES[target.kind].time : reveal ? 1 - reveal.queue.length / Math.max(1, reveal.total) : 0;
+        hold.querySelector('i').style.width = `${Math.min(1, frac) * 100}%`;
+      }
+      updateMarkers();
+
+      const m = Math.floor(timeLeft / 60), s = Math.floor(timeLeft % 60);
+      line.innerHTML = `${m}:${String(s).padStart(2, '0')}<span>·</span>Pack ${pack.length}/${packSize()}<span>·</span>${packValue()} cr`;
+      line.style.color = timeLeft < 60 ? '#ff8a70' : '#fff';
+      const shielded = player.protectT > 0; sub.hidden = !shielded;
+      if (shielded) sub.textContent = `Shielded ${player.protectT.toFixed(1)}s`;
+      kit.innerHTML = `${keycards ? `<span style="color:#d48bff">Keycards <b style="color:#d48bff">${keycards}</b></span> · ` : ''}Medkits <b>${medkits}</b> <span style="opacity:.6">H</span> · Armour <b>${Math.round(armor)}</b><div class="bar"><i style="width:${armor}%"></i></div>`;
+      const showPack = input.down('Tab'); if (showPack) renderPack(); panel.hidden = !showPack;
+    },
+  };
+}
