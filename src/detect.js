@@ -24,7 +24,7 @@ export function init(ctx) {
   return {
     update() {
       const inRaid = ctx.raid ? ctx.raid.state === 'raid' : true;
-      const bots = inRaid && ctx.bots ? ctx.bots.list : [];
+      const bots = inRaid && ctx.bots ? (ctx.drones ? ctx.bots.list.concat(ctx.drones.list) : ctx.bots.list) : []; // drones show on the ring too
       const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
       let n = 0, worst = 'unaware', top = 0;
       for (const b of bots) {
