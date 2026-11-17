@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createInventory, BAGS } from './inventory.js';
+import { bump } from './progress.js';
 
 // Extraction mode. Deploy, search crates and fallen guards for loot, reach an extraction zone and hold it
 // to bank what you carry. Die or run out of time and the backpack is lost. Banked credits buy upgrades.
@@ -297,7 +298,7 @@ export function init(ctx) {
   // opening a container starts a reveal: items come out one at a time (see update), best saved for last
   function search(L) {
     if (L.kind === 'terminal') { // signal station: see every guard on the map for a minute, and push the reinforcements back
-      L.opened = true; L.strip.material = mats(L.kind).dead; revealT = 60; phaseDelay += 60;
+      L.opened = true; L.strip.material = mats(L.kind).dead; revealT = 60; phaseDelay += 60; bump(stash, 'terminal');
       toast('Signal tapped — guards are marked on your map (M) for 60 s and reinforcements are delayed', '#35e0d8'); chime([660, 990, 1320], 0.08, 0.3, 0.2);
       return;
     }
@@ -376,7 +377,9 @@ export function init(ctx) {
     detected = false; for (const c of contracts) { c.n = 0; c.done = false; }
     keycards = 0; phase = 0; lateExit = false; exitSec = 0; revealT = 0; phaseDelay = 0; keyT = 0; holdNeed = RAID.extractHold;
     bagBonus = stash.b && stash.b[0] ? stash.b[0].size : 0; foundBag = 0;
-    state = 'raid'; timeLeft = RAID.time; pack = []; holdT = 0; exitT = 0; result = null; reveal = null; raidGuns.clear();
+    if (stash.upgrades.scout) revealT = 30; // comms room: the opening picture
+    player.maxHp = 100 + (stash.upgrades.health ? 25 : 0); // med bay level 2
+    state = 'raid'; timeLeft = RAID.time + (stash.upgrades.time ? 90 : 0); pack = []; holdT = 0; exitT = 0; result = null; reveal = null; raidGuns.clear();
     // everything in the pack comes along: supplies are put to use, valuables ride in the pack (and are at risk)
     medkits = baseMed(); armor = baseArmor(); broughtMed = 0; brought.clear();
     for (const it of stash.pack || []) {
@@ -431,7 +434,8 @@ export function init(ctx) {
       for (let n = Math.min(broughtMed, Math.max(0, medkits - baseMed())); n > 0; n--) back.push({ t: 'med' });
       stash.pack = back; menu.normalise();
       for (const extra of stash.pack.splice(packSize())) if (extra) menu.addToStash(extra);
-      for (const id of raidGuns) if (!brought.has(id)) menu.addToStash({ t: 'weapon', id });
+      for (const id of raidGuns) if (!brought.has(id)) { menu.addToStash({ t: 'weapon', id }); bump(stash, 'foundGun'); }
+      if (stash.streak >= 3) bump(stash, 'streak3');
       chime([520, 660, 780, 1040, 1320], 0.09, 0.45, 0.2);
     } else {
       stash.lost++; stash.streak = 0; stash.pack = []; stash.w = [null, null]; stash.b = [null];
@@ -450,6 +454,10 @@ export function init(ctx) {
   events.on('playerDied', () => endRaid('kia'));
   events.on('botDied', (e) => {
     if (state !== 'raid' || !e.point) return;
+    if (e.by === player) { // progress on trader tasks
+      if (e.bot && e.bot.kind === 'drone') bump(stash, 'droneKill'); else if (e.bot && e.bot.kind === 'heavy') bump(stash, 'heavyKill');
+      if (ctx.weapons && ctx.weapons.current && ctx.weapons.current.def.id === 'pistol' && !(e.bot && e.bot.kind === 'drone')) bump(stash, 'pistolKill');
+    }
     // tougher enemy types carry better loot
     const rich = e.bot && (e.bot.kind === 'heavy' || e.bot.kind === 'marksman');
     const L = addLootable('bag', e.point.x + rnd(-0.4, 0.4), floorBelow(e.point.x, e.point.y, e.point.z), e.point.z + rnd(-0.4, 0.4), Math.random() * 3);
@@ -637,7 +645,7 @@ export function init(ctx) {
         if (keycards > 0 && input.down('KeyF')) {
           doorT += dt;
           if (doorT >= 1.5) {
-            sr.open = true; keycards--; doorT = 0; world.removeCollider(sr.door);
+            sr.open = true; keycards--; doorT = 0; world.removeCollider(sr.door); bump(stash, 'strongroom');
             toast('Strongroom open — the alarm is calling guards in', '#d48bff'); chime([330, 440, 330, 440], 0.16, 0.3, 0.22, 'sawtooth');
             if (ctx.bots && phase === 0) { phase = 1; ctx.bots.config.respawnDelay = 16; ctx.bots.setCount(RAID.bots + 1); }
           }

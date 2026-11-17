@@ -24,6 +24,7 @@ const COLOR = { common: '#c9d1d9', uncommon: '#5fd38a', rare: '#5aa9ff', epic: '
 export const BAGS = { 4: { name: 'Sling pack', cost: 800 }, 8: { name: 'Field ruck', cost: 2000 } }; // backpacks add this many pack slots
 const SUPPLY = { med: { name: 'Medkit', cost: 150, desc: 'Heals 60. Press H in a raid.' }, plate: { name: 'Armour plate', cost: 300, desc: '+50 armour when you deploy.' } };
 export const STASH_SLOTS = 40;
+import { STATIONS, TRADERS, taskState, stationLevel, canBuild, build, claim, countItem } from './progress.js';
 const esc = (s) => String(s).replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
 
 export function createInventory(ctx, api) {
@@ -99,6 +100,16 @@ export function createInventory(ctx, api) {
     #iv .up:hover { border-color: #ffc56b; }
     #iv .up.own { opacity: .45; cursor: default; border-color: rgba(255,255,255,.1); }
     #iv .up b { color: #ffc56b; font-weight: 600; white-space: nowrap; }
+    #iv .tabs { display: flex; gap: 4px; margin-top: 4px; }
+    #iv .tabs span { flex: 1; padding: 6px 0; text-align: center; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; background: rgba(255,255,255,.05); cursor: pointer; }
+    #iv .tabs span.on { background: #ffc56b; color: #14100a; font-weight: 700; }
+    #iv .card { margin-top: 8px; padding: 9px 11px; background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.1); font-size: 12px; letter-spacing: .5px; line-height: 1.5; }
+    #iv .card b { display: block; letter-spacing: 1.5px; text-transform: uppercase; }
+    #iv .card .dim { display: block; opacity: .65; font-size: 11px; }
+    #iv .card .dim span { opacity: 1; }
+    #iv .card .task { margin-top: 5px; }
+    #iv .mini.go2 { border-color: #ffc56b; color: #ffc56b; }
+    #iv .mini.off { opacity: .4; cursor: default; }
     #iv .sell { display: flex; align-items: center; justify-content: center; height: 54px; margin-top: 8px; border: 1px dashed rgba(255,138,112,.6); color: #ff8a70; font-size: 12px; letter-spacing: 4px; text-transform: uppercase; }
     #iv .sell.over { background: rgba(255,138,112,.16); border-style: solid; }
     #iv button { font: inherit; color: inherit; cursor: pointer; }
@@ -114,7 +125,7 @@ export function createInventory(ctx, api) {
   document.head.appendChild(style);
   const root = document.createElement('div'); root.id = 'iv'; root.hidden = true; document.body.appendChild(root);
   const tip = document.createElement('div'); tip.id = 'iv-tip'; tip.hidden = true; document.body.appendChild(tip);
-  let ghost = null, drag = null;
+  let ghost = null, drag = null, tab = 'shop';
 
   const tile = (it, cls = '') => `<div class="iv-tile ${cls}" style="--c:${COLOR[kindOf(it)]}"><svg viewBox="0 0 24 24"><path d="${iconOf(it)}"/></svg><span class="nm">${esc(nameOf(it))}</span><span class="vl">${it.t === 'loot' ? it.value : ''}</span></div>`;
   const slot = (zone, i, it, cls = '', ph = '') => `<div class="slot ${cls}" data-zone="${zone}" data-i="${i}">${it ? tile(it, cls === 'wide' ? 'row' : '') : `<div class="ph">${ph}</div>`}</div>`;
@@ -149,15 +160,27 @@ export function createInventory(ctx, api) {
         <div class="contracts">${contractsHtml()}</div>
       </div>
       <div>
-        <h3 style="margin-top:4px">Shop — click to buy</h3>
-        <div class="shop">${shop.map((s, i) => `<div class="slot ${stash.credits < s.cost ? 'short' : ''}" data-buy="${i}">${tile(s.it)}<span class="vl" style="position:absolute;left:3px;bottom:2px;font-size:9px;color:#ffc56b">${s.cost}</span></div>`).join('')}</div>
-        <h3>Upgrades</h3>
-        ${UPGRADES.map((u) => `<div class="up ${stash.upgrades[u.id] ? 'own' : ''}" data-up="${u.id}"><span>${esc(u.name)}<br><span style="opacity:.6;font-size:10px">${esc(u.desc)}</span></span><b>${stash.upgrades[u.id] ? 'Owned' : `${u.cost} cr`}</b></div>`).join('')}
+        <div class="tabs">${[['shop', 'Shop'], ['traders', 'Traders'], ['base', 'Base'], ['settings', 'Settings']].map(([id, label]) => `<span class="${tab === id ? 'on' : ''}" data-tab="${id}">${label}</span>`).join('')}</div>
+        ${tab === 'shop' ? `<h3 style="margin-top:10px">Click to buy</h3><div class="shop">${shop.map((s, i) => `<div class="slot ${stash.credits < s.cost ? 'short' : ''}" data-buy="${i}">${tile(s.it)}<span class="vl" style="position:absolute;left:3px;bottom:2px;font-size:9px;color:#ffc56b">${s.cost}</span></div>`).join('')}</div>` : ''}
+        ${tab === 'traders' ? TRADERS.map((tr) => {
+          const st = taskState(stash, tr), t = st.task;
+          const reward = t ? [t.reward.cr ? `${t.reward.cr} cr` : ''].concat(t.reward.items.map((it) => esc(nameOf(it)))).filter(Boolean).join(' + ') : '';
+          return `<div class="card"><b>${esc(tr.name)}</b><span class="dim">${esc(tr.blurb)} · ${st.s.i}/${tr.tasks.length} tasks done</span>${t
+            ? `<div class="task">${esc(t.text)} <span class="dim">${st.have}/${st.need}</span></div><div class="dim">Reward: ${reward}</div><button class="mini ${st.done ? 'go2' : 'off'}" data-claim="${tr.id}">${st.done ? (t.handin ? 'Hand in' : 'Claim reward') : 'In progress'}</button>`
+            : '<div class="task">Nothing more to ask of you.</div>'}</div>`;
+        }).join('') : ''}
+        ${tab === 'base' ? STATIONS.map((stn) => {
+          const lv = stationLevel(stash, stn), next = stn.levels[lv];
+          const have = stn.levels.slice(0, lv).map((l) => `<div class="dim">✔ ${esc(l.desc)}</div>`).join('');
+          if (!next) return `<div class="card"><b>${esc(stn.name)}</b><span class="dim">Level ${lv}/${stn.levels.length} · complete</span>${have}</div>`;
+          const needs = next.need.map(([name, n]) => { const c = countItem(stash, name); return `<span style="color:${c >= n ? '#9be37a' : '#ff8a70'}">${n} × ${esc(name)} (${c})</span>`; }).join(', ');
+          return `<div class="card"><b>${esc(stn.name)}</b><span class="dim">Level ${lv}/${stn.levels.length}</span>${have}<div class="task">Next: ${esc(next.desc)}</div><div class="dim">Needs <span style="color:${stash.credits >= next.cost ? '#9be37a' : '#ff8a70'}">${next.cost} cr</span>, ${needs}</div><button class="mini ${canBuild(stash, next) ? 'go2' : 'off'}" data-build="${stn.id}">Build</button></div>`;
+        }).join('') : ''}
+        ${tab === 'settings' ? '<div id="iv-settings" style="margin-top:12px"></div>' : ''}
       </div>
-      <div style="grid-column:3"><h3 style="margin-top:0">Settings</h3><div id="iv-settings"></div></div>
       <div class="help">Drag tiles between the stash, your pack and the weapon slots. What you carry is lost if you die. In a raid: F search · H medkit · Tab pack · M map · Esc pause and settings · N mute.</div>`;
     root._shop = shop;
-    if (ctx.mountSettings) ctx.mountSettings(root.querySelector('#iv-settings'));
+    const setHost = root.querySelector('#iv-settings'); if (setHost && ctx.mountSettings) ctx.mountSettings(setHost);
   }
 
   // ---- interactions ---------------------------------------------------------
@@ -202,15 +225,20 @@ export function createInventory(ctx, api) {
     ghost.remove(); ghost = null; drag = null; save(); render();
   });
   root.addEventListener('click', (e) => {
-    const buy = e.target.closest('[data-buy]'), up = e.target.closest('[data-up]'), act = e.target.closest('[data-act]');
+    const buy = e.target.closest('[data-buy]'), act = e.target.closest('[data-act]'), tabEl = e.target.closest('[data-tab]'), claimEl = e.target.closest('[data-claim]'), buildEl = e.target.closest('[data-build]');
     if (buy) {
       const s = root._shop[Number(buy.dataset.buy)];
       if (stash.credits < s.cost || stash.grid.indexOf(null) < 0) return chime([200], 0.05, 0.12, 0.1, 'square');
       stash.credits -= s.cost; addToStash({ ...s.it }); chime([660, 880]);
-    } else if (up) {
-      const u = UPGRADES.find((x) => x.id === up.dataset.up);
-      if (stash.upgrades[u.id] || stash.credits < u.cost) return;
-      stash.credits -= u.cost; stash.upgrades[u.id] = true; chime([660, 880, 1100]);
+    } else if (tabEl) { tab = tabEl.dataset.tab; render(); return;
+    } else if (claimEl) {
+      const tr = TRADERS.find((t) => t.id === claimEl.dataset.claim);
+      if (!claim(stash, tr, addToStash)) return chime([200], 0.05, 0.12, 0.1, 'square');
+      chime([520, 660, 780, 1040], 0.08, 0.35, 0.2);
+    } else if (buildEl) {
+      const stn = STATIONS.find((x) => x.id === buildEl.dataset.build), next = stn.levels[stationLevel(stash, stn)];
+      if (!next || !build(stash, next)) return chime([200], 0.05, 0.12, 0.1, 'square');
+      chime([440, 660, 880, 1100], 0.08, 0.35, 0.2);
     } else if (act && act.dataset.act === 'sellpack') {
       stash.pack.forEach((it, i) => { if (it && it.t === 'loot') { stash.credits += it.value; stash.pack[i] = null; } }); chime([880, 1320], 0.05, 0.14);
     } else if (act && act.dataset.act === 'store') {
