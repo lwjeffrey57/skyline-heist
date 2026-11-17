@@ -30,6 +30,19 @@ function boxGeo(w, h, d, tile = 4) {
 
 export function createWorld(scene, renderer) {
   const colliders = [];
+  // Spatial index: solid pieces are filed under the 8 m grid cells they touch, so collision and ray checks only look
+  // at what is nearby. Very large pieces (the ground, the perimeter walls) sit in a short list that is always checked.
+  const CELL = 8, grid = new Map(), big = []; let stamp = 0;
+  const cellKey = (cx, cz) => (cx + 2048) * 4096 + (cz + 2048);
+  const eachCell = (c, fn) => { for (let cx = Math.floor(c.min.x / CELL); cx <= Math.floor(c.max.x / CELL); cx++) for (let cz = Math.floor(c.min.z / CELL); cz <= Math.floor(c.max.z / CELL); cz++) fn(cellKey(cx, cz)); };
+  function indexAdd(c) {
+    if (c.max.x - c.min.x > 48 || c.max.z - c.min.z > 48) { c._big = true; big.push(c); return; }
+    eachCell(c, (k) => { let l = grid.get(k); if (!l) grid.set(k, (l = [])); l.push(c); });
+  }
+  function indexRemove(c) {
+    if (c._big) { const i = big.indexOf(c); if (i >= 0) big.splice(i, 1); return; }
+    eachCell(c, (k) => { const l = grid.get(k); if (!l) return; const i = l.indexOf(c); if (i >= 0) l.splice(i, 1); });
+  }
   const pads = [];
   const ziplines = [];
   const M = createMaterials(renderer);
@@ -55,7 +68,7 @@ export function createWorld(scene, renderer) {
         mesh, tag, destructible, mat,
       };
       mesh.userData.collider = c;
-      colliders.push(c);
+      colliders.push(c); indexAdd(c);
     }
     return mesh;
   }
@@ -71,6 +84,7 @@ export function createWorld(scene, renderer) {
     ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
     scene.add(ground);
     colliders.push({ min: new THREE.Vector3(-450, -5, -450), max: new THREE.Vector3(450, 0, 450), mesh: ground, tag: 'ground', destructible: false, mat: M.ground });
+    indexAdd(colliders[colliders.length - 1]);
   }
   // painted ground markings
   const mark = (x, z, w, d, mat = M.paint) => addBox(x, 0.005, z, w, 0.012, d, mat, { solid: false, shadow: false });
@@ -312,12 +326,41 @@ export function createWorld(scene, renderer) {
     colliders, pads, ziplines, buildings, materials: M, arenaHalf: ARENA, seed, strongroom,
     spawn: new THREE.Vector3(0, 0, 50),
     // nearest solid box along a ray -> { collider, point, normal, dist } or null
+    // every solid piece touching the box x0..x1, z0..z1 (any height), written into `out` and returned
+    near(x0, x1, z0, z1, out = []) {
+      out.length = 0; stamp++;
+      for (const c of big) out.push(c);
+      for (let cx = Math.floor(x0 / CELL); cx <= Math.floor(x1 / CELL); cx++) for (let cz = Math.floor(z0 / CELL); cz <= Math.floor(z1 / CELL); cz++) {
+        const l = grid.get(cellKey(cx, cz)); if (!l) continue;
+        for (const c of l) if (c._q !== stamp) { c._q = stamp; out.push(c); }
+      }
+      return out;
+    },
     raycast(origin, dir, maxDist = 500) {
       let best = null;
-      for (const c of colliders) {
-        const h = rayAABB(origin, dir, c.min, c.max, best ? best.dist : maxDist);
-        if (h) best = { collider: c, dist: h.t, normal: h.normal };
+      const test = (c) => { const h = rayAABB(origin, dir, c.min, c.max, best ? best.dist : maxDist); if (h) best = { collider: c, dist: h.t, normal: h.normal }; };
+      for (const c of big) test(c);
+      // walk the grid cells the ray crosses, nearest first, and stop once a hit lies before the next cell
+      stamp++;
+      let cx = Math.floor(origin.x / CELL), cz = Math.floor(origin.z / CELL);
+      const ax = Math.abs(dir.x), az = Math.abs(dir.z), sx = dir.x > 0 ? 1 : -1, sz = dir.z > 0 ? 1 : -1;
+      const tdx = ax > 1e-9 ? CELL / ax : Infinity, tdz = az > 1e-9 ? CELL / az : Infinity;
+      let tx = ax > 1e-9 ? (dir.x > 0 ? (cx + 1) * CELL - origin.x : origin.x - cx * CELL) / ax : Infinity;
+      let tz = az > 1e-9 ? (dir.z > 0 ? (cz + 1) * CELL - origin.z : origin.z - cz * CELL) / az : Infinity;
+      for (let guard = 0; guard < 600; guard++) {
+        const l = grid.get(cellKey(cx, cz));
+        if (l) for (const c of l) if (c._q !== stamp) { c._q = stamp; test(c); }
+        const next = Math.min(tx, tz);
+        if ((best && best.dist <= next) || next > maxDist) break;
+        if (tx < tz) { cx += sx; tx += tdx; } else { cz += sz; tz += tdz; }
       }
+      if (best) best.point = origin.clone().addScaledVector(dir, best.dist);
+      return best;
+    },
+    // the old exhaustive ray check, kept for verifying the indexed one
+    raycastSlow(origin, dir, maxDist = 500) {
+      let best = null;
+      for (const c of colliders) { const h = rayAABB(origin, dir, c.min, c.max, best ? best.dist : maxDist); if (h) best = { collider: c, dist: h.t, normal: h.normal }; }
       if (best) best.point = origin.clone().addScaledVector(dir, best.dist);
       return best;
     },
@@ -327,7 +370,7 @@ export function createWorld(scene, renderer) {
     },
     // boxes touching a sphere
     overlapSphere(p, r) {
-      return colliders.filter((c) => {
+      return world.near(p.x - r, p.x + r, p.z - r, p.z + r).filter((c) => {
         const dx = Math.max(c.min.x - p.x, 0, p.x - c.max.x), dy = Math.max(c.min.y - p.y, 0, p.y - c.max.y), dz = Math.max(c.min.z - p.z, 0, p.z - c.max.z);
         return dx * dx + dy * dy + dz * dz <= r * r;
       });
@@ -335,7 +378,7 @@ export function createWorld(scene, renderer) {
     // take a piece out of the world (mesh and collision)
     removeCollider(c) {
       const i = colliders.indexOf(c); if (i < 0) return false;
-      colliders.splice(i, 1);
+      colliders.splice(i, 1); indexRemove(c);
       if (c.mesh) { c.mesh.removeFromParent(); c.mesh.geometry.dispose(); }
       return true;
     },

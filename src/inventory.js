@@ -128,7 +128,7 @@ export function createInventory(ctx, api) {
       <div>
         <h1>Skyline Heist</h1>
         <div class="cr">${stash.credits}<small>CREDITS</small></div>
-        <div class="rec">${stash.extracted} extractions · ${stash.lost} raids lost · best haul ${stash.best} cr</div>
+        <div class="rec">${stash.extracted} extractions · ${stash.lost} lost · streak ${stash.streak || 0} (best ${stash.bestStreak || 0})<br>best haul ${stash.best} cr${stash.fastest ? ` · fastest exit ${Math.floor(stash.fastest / 60)}:${String(Math.round(stash.fastest % 60)).padStart(2, '0')}` : ''}</div>
         <h3>Weapons — at risk</h3>
         <div class="grid">
           <div class="slot wide"><div class="iv-tile row fixed" style="--c:#e9e3d4"><svg viewBox="0 0 24 24"><path d="${ICON.pistol}"/></svg><span class="nm">${esc(pistol ? pistol.name : 'Pistol')} · sidearm</span></div></div>
@@ -154,8 +154,10 @@ export function createInventory(ctx, api) {
         <h3>Upgrades</h3>
         ${UPGRADES.map((u) => `<div class="up ${stash.upgrades[u.id] ? 'own' : ''}" data-up="${u.id}"><span>${esc(u.name)}<br><span style="opacity:.6;font-size:10px">${esc(u.desc)}</span></span><b>${stash.upgrades[u.id] ? 'Owned' : `${u.cost} cr`}</b></div>`).join('')}
       </div>
+      <div style="grid-column:3"><h3 style="margin-top:0">Settings</h3><div id="iv-settings"></div></div>
       <div class="help">Drag tiles between the stash, your pack and the weapon slots. What you carry is lost if you die. In a raid: F search · H medkit · Tab pack · N mute.</div>`;
     root._shop = shop;
+    if (ctx.mountSettings) ctx.mountSettings(root.querySelector('#iv-settings'));
   }
 
   // ---- interactions ---------------------------------------------------------
@@ -171,6 +173,7 @@ export function createInventory(ctx, api) {
     to[ti] = it; from[i] = other || null; chime([520], 0.05, 0.08, 0.1);
   }
   root.addEventListener('mousedown', (e) => {
+    if (e.target.closest('#iv-settings')) return;
     const s = e.target.closest('[data-zone]'); if (!s || e.button !== 0 || s.dataset.zone === 'sell') return;
     const it = zoneArr(s.dataset.zone)[Number(s.dataset.i)]; if (!it) return;
     drag = { zone: s.dataset.zone, i: Number(s.dataset.i), it };

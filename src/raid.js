@@ -116,6 +116,8 @@ export function init(ctx) {
     #rd-kit .bar i { display: block; height: 100%; background: #7fb4ff; }
     #rd-contracts { position: fixed; left: 24px; top: 118px; font-size: 12px; letter-spacing: 1px; line-height: 1.6; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.8); pointer-events: none; }
     #rd-contracts .h { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; opacity: .7; }
+    #rd-hint { position: fixed; left: 50%; top: 124px; transform: translateX(-50%); max-width: 520px; padding: 8px 14px; background: rgba(8,12,16,.6); border-left: 2px solid #9be37a; color: #fff; font-size: 13px; letter-spacing: 1px; text-align: center; pointer-events: none; }
+    #rd-hint b { color: #9be37a; }
     #rd-hold { position: fixed; left: 50%; top: 64%; transform: translateX(-50%); width: 220px; text-align: center; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.75); pointer-events: none; }
     #rd-hold .bar { height: 5px; background: rgba(255,255,255,.2); margin-top: 6px; }
     #rd-hold .bar i { display: block; height: 100%; background: #9be37a; width: 0; }
@@ -146,6 +148,7 @@ export function init(ctx) {
   const top = el('rd-top', '<div class="mode">Extraction</div><div class="line"></div><div class="sub" hidden></div>');
   const kit = el('rd-kit'), hold = el('rd-hold', '<span></span><div class="bar"><i></i></div>'), toasts = el('rd-toasts'), panel = el('rd-panel');
   const cbox = el('rd-contracts'); cbox.hidden = true;
+  const hint = el('rd-hint'); hint.hidden = true;
   hold.hidden = true; panel.hidden = true;
   const line = top.querySelector('.line'), sub = top.querySelector('.sub');
   function toast(html, color = '#fff') {
@@ -167,7 +170,8 @@ export function init(ctx) {
   }
   const TIER_SOUND = { common: [[620]], uncommon: [[620, 830]], rare: [[620, 830, 1110], 0.07, 0.24, 0.2], epic: [[620, 830, 1110, 1480, 1860], 0.08, 0.4, 0.24] };
   let contracts = [], detected = false;
-  let doorT = 0;
+  let doorT = 0, hintStep = 0, everInZone = false; // first-raid hints
+  events.on('lootTaken', () => { if (hintStep === 0) hintStep = 1; });
   let keycards = 0, phase = 0, lateExit = false, exitSec = 0; // keycards open vault cases; the raid escalates in phases
   let reveal = null; // the container being emptied, one item at a time
   const brought = new Set(); let broughtMed = 0, menu = null; // weapons and medkits taken in from the loadout
@@ -385,12 +389,14 @@ export function init(ctx) {
     const value = packValue();
     const nameOf = (id) => { const s = ctx.weapons && ctx.weapons.inventory.find((v) => v.def.id === id); return s ? s.def.name : id; };
     const items = pack.slice().sort((a, b) => b.value - a.value), guns = [...raidGuns].filter((id) => !brought.has(id)).map(nameOf);
-    result = { kind, value, items, guns, saved: null, bonus: 0 };
+    result = { kind, value, items, guns, saved: null, bonus: 0, at: ctx.time, shown: 0 };
     for (const c of contracts) c.done = kind === 'extracted' && met(c);
     stash.inRaid = false;
     if (kind === 'extracted') {
       result.bonus = contracts.reduce((a, c) => a + (c.done ? c.def.pay : 0), 0); stash.credits += result.bonus;
       stash.extracted++; stash.best = Math.max(stash.best, value);
+      const took = RAID.time - timeLeft; stash.fastest = stash.fastest ? Math.min(stash.fastest, took) : took;
+      stash.streak = (stash.streak || 0) + 1; stash.bestStreak = Math.max(stash.bestStreak || 0, stash.streak); stash.tutorialDone = true;
       // the haul stays in your pack for you to sort; unused medkits you brought come back; found weapons go to the stash
       if (foundBag) { const old = stash.b && stash.b[0]; stash.b = [{ t: 'bag', size: foundBag }]; if (old) menu.addToStash(old); } // the bigger backpack is now yours
       const back = items.map((i) => ({ t: 'loot', name: i.name, tier: i.tier, value: i.value }));
@@ -400,7 +406,7 @@ export function init(ctx) {
       for (const id of raidGuns) if (!brought.has(id)) menu.addToStash({ t: 'weapon', id });
       chime([520, 660, 780, 1040, 1320], 0.09, 0.45, 0.2);
     } else {
-      stash.lost++; stash.pack = []; stash.w = [null, null]; stash.b = [null];
+      stash.lost++; stash.streak = 0; stash.pack = []; stash.w = [null, null]; stash.b = [null];
       if (stash.upgrades.pouch && items.length) { result.saved = items[0]; menu.addToStash({ t: 'loot', name: items[0].name, tier: items[0].tier, value: items[0].value }); }
       result.guns = [...new Set([...raidGuns, ...brought])].map(nameOf);
       menu.normalise();
@@ -469,8 +475,11 @@ export function init(ctx) {
       <div class="go">Enter to deploy · Backspace to return to the stash</div></div>`;
   }
   function renderResult() {
-    const t = { extracted: ['Extracted', `Haul worth ${result.value} credits is in your pack — store or sell it in the stash`], kia: ['Killed in action', `Lost a pack worth ${result.value} credits`], mia: ['Missing in action', `Time ran out — lost a pack worth ${result.value} credits`] }[result.kind];
-    const rows = result.items.map((i) => `<tr><td style="color:${TIERS[i.tier].color}">${esc(i.name)}${result.saved === i ? ' <span style="color:#9be37a">— saved by the secure pouch, sent to your stash</span>' : ''}</td><td>${i.value} cr</td></tr>`).join('') || '<tr><td class="dim">Empty pack</td><td></td></tr>';
+    const shown = result.kind === 'extracted' ? Math.min(result.items.length, Math.floor((ctx.time - result.at) / 0.22)) : result.items.length;
+    if (shown > (result.shown || 0) && result.kind === 'extracted') { result.shown = shown; chime([520 + shown * 60], 0.05, 0.12, 0.14); }
+    const tally = result.items.slice(0, shown).reduce((a, i) => a + i.value, 0);
+    const t = { extracted: ['Extracted', `Haul worth <b style="color:#ffc56b;font-size:16px">${tally}</b> credits is in your pack — store or sell it in the stash`], kia: ['Killed in action', `Lost a pack worth ${result.value} credits`], mia: ['Missing in action', `Time ran out — lost a pack worth ${result.value} credits`] }[result.kind];
+    const rows = result.items.slice(0, shown).map((i) => `<tr><td style="color:${TIERS[i.tier].color}">${esc(i.name)}${result.saved === i ? ' <span style="color:#9be37a">— saved by the secure pouch, sent to your stash</span>' : ''}</td><td>${i.value} cr</td></tr>`).join('') || '<tr><td class="dim">Empty pack</td><td></td></tr>';
     const guns = result.guns.length ? `<p style="margin-top:10px;color:${result.kind === 'extracted' ? '#9be37a' : '#ff8a70'}">${result.kind === 'extracted' ? 'Weapons found — sent to your stash' : 'Weapons lost'}: ${result.guns.map(esc).join(', ')}</p>` : '';
     panel.innerHTML = `<div class="box"><h2>${t[0]}</h2><p>${t[1]}</p><table>${rows}</table>${guns}<p style="margin:12px 0 4px;letter-spacing:2px;text-transform:uppercase;font-size:10px">Contracts${result.bonus ? ` — bonus ${result.bonus} cr` : ''}</p><div style="font-size:13px;line-height:1.6">${contractRows(true)}</div><div class="go">Press Enter — a new map layout loads, then click to continue</div></div>`;
   }
@@ -542,7 +551,7 @@ export function init(ctx) {
   return {
     update(dt) {
       if (state !== 'raid') {
-        player.protectT = 1e9; top.hidden = true; kit.hidden = true; hold.hidden = true; panel.hidden = false; cbox.hidden = true;
+        player.protectT = 1e9; top.hidden = true; kit.hidden = true; hold.hidden = true; panel.hidden = false; cbox.hidden = true; hint.hidden = true;
         if (state === 'stash') {
           // the stash is a mouse-driven screen: release the pointer and show it
           panel.hidden = true; menu.show();
@@ -632,6 +641,13 @@ export function init(ctx) {
       }
       if (exitT >= RAID.extractHold) { endRaid('extracted'); return; }
 
+      if (inZone) everInZone = true;
+      if (!stash.tutorialDone) {
+        const text = hintStep === 0 ? 'Crates have a glowing band. Walk up to one and hold <b>F</b> to search it.'
+          : !everInZone ? 'Follow a green <b>EXIT</b> on the compass at the top. <b>Tab</b> opens your pack, <b>H</b> uses a medkit.'
+            : 'Stay inside the green zone until the bar fills to get out with your loot.';
+        hint.innerHTML = text; hint.hidden = false;
+      } else hint.hidden = true;
       const showBar = inZone || holdT > 0 || !!reveal || doorT > 0;
       hold.hidden = !showBar;
       if (showBar) {

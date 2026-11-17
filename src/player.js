@@ -48,7 +48,7 @@ export class Player {
   }
 
   free(x, y, z, h) {
-    for (const c of this.world.colliders) {
+    for (const c of this.world.near(x - 1, x + 1, z - 1, z + 1, this._nB || (this._nB = []))) {
       if (x - R < c.max.x && x + R > c.min.x && y < c.max.y && y + h > c.min.y && z - R < c.max.z && z + R > c.min.z) return false;
     }
     return true;
@@ -57,7 +57,7 @@ export class Player {
   moveAxis(axis, delta) {
     if (delta === 0) return;
     const p = this.pos; p[axis] += delta;
-    for (const c of this.world.colliders) {
+    for (const c of this.world.near(p.x - 1.5, p.x + 1.5, p.z - 1.5, p.z + 1.5, this._nA || (this._nA = []))) {
       if (!(p.x - R < c.max.x && p.x + R > c.min.x && p.y < c.max.y && p.y + this.h > c.min.y && p.z - R < c.max.z && p.z + R > c.min.z)) continue;
       if (axis === 'y') {
         if (delta < 0) { p.y = c.max.y; this.hitGround = true; } else p.y = c.min.y - this.h - 1e-4;
@@ -74,7 +74,7 @@ export class Player {
 
   groundBelow(maxDist) {
     const p = this.pos; let best = -Infinity;
-    for (const c of this.world.colliders) {
+    for (const c of this.world.near(p.x - 1, p.x + 1, p.z - 1, p.z + 1, this._nB || (this._nB = []))) {
       if (p.x - R < c.max.x && p.x + R > c.min.x && p.z - R < c.max.z && p.z + R > c.min.z
         && c.max.y <= p.y + 1e-4 && c.max.y >= p.y - maxDist && c.max.y > best) best = c.max.y;
     }
@@ -84,7 +84,7 @@ export class Player {
   tryMantle(fx, fz) {
     const p = this.pos, px = p.x + fx * (R + 0.5), pz = p.z + fz * (R + 0.5);
     let best = Infinity;
-    for (const c of this.world.colliders) {
+    for (const c of this.world.near(px - 1, px + 1, pz - 1, pz + 1, this._nA || (this._nA = []))) {
       if (!(px - R < c.max.x && px + R > c.min.x && pz - R < c.max.z && pz + R > c.min.z)) continue;
       const top = c.max.y;
       if (top <= p.y + STEP || top > p.y + 2.5 || top >= best) continue;

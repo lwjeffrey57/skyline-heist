@@ -12,6 +12,8 @@ import * as decor from './decor.js';
 import * as detect from './detect.js';
 import * as ui from './ui.js';
 import * as dmgnum from './dmgnum.js';
+import * as settings from './settings.js';
+import * as hitreact from './hitreact.js';
 import * as raid from './raid.js'; // director.js (free-for-all deathmatch) is kept in the repo but not loaded
 
 // Integration only: builds the shared ctx (see core.js) and runs every system each frame.
@@ -40,7 +42,7 @@ events.on('pieceSplit', ({ collider, parts }) => {
 events.on('pieceDestroyed', ({ collider }) => { if (collider.zipline) world.removeZipline(collider.zipline); });
 
 const systems = [];
-for (const [name, mod] of Object.entries({ destruction, decor, fx, audio, weapons, bots, raid, detect, ui, dmgnum })) {
+for (const [name, mod] of Object.entries({ destruction, decor, fx, audio, weapons, bots, raid, detect, ui, dmgnum, settings, hitreact })) {
   try { const s = mod.init(ctx); if (s) systems.push({ name, ...s }); } catch (e) { console.error(`[${name}] init failed`, e); }
 }
 
@@ -66,7 +68,7 @@ document.addEventListener('pointerlockchange', () => {
 document.addEventListener('mousemove', (e) => {
   if (!playing || ctx.uiOpen) return;
   if (dragLook && !(e.buttons & 2)) return;
-  const sens = 0.0022 * player.fovScale;
+  const sens = 0.0022 * player.fovScale * (ctx.settings ? ctx.settings.sens : 1);
   player.yaw -= e.movementX * sens;
   player.pitch = THREE.MathUtils.clamp(player.pitch - e.movementY * sens, -1.5, 1.5);
 });
