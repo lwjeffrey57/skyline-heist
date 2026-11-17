@@ -4,7 +4,7 @@ import { createInventory, BAGS } from './inventory.js';
 // Extraction mode. Deploy, search crates and fallen guards for loot, reach an extraction zone and hold it
 // to bank what you carry. Die or run out of time and the backpack is lost. Banked credits buy upgrades.
 
-const RAID = { time: 480, bots: 6, botDamage: 6, botRespawn: 25, extractHold: 6, extractRadius: 3.6, protect: 4 };
+const RAID = { time: 720, bots: 9, botDamage: 6, botRespawn: 25, extractHold: 6, extractRadius: 3.6, protect: 4 };
 const TIERS = {
   common: { color: '#c9d1d9', w: 60 }, uncommon: { color: '#5fd38a', w: 27 }, rare: { color: '#5aa9ff', w: 10 }, epic: { color: '#d48bff', w: 1.5 },
 };
@@ -367,7 +367,9 @@ export function init(ctx) {
     }
     stash.pack = (stash.pack || []).map(() => null); stash.inRaid = true;
     const points = world.spawnPoints || SPAWNS; // at the edge of the site, outside the built-up centre
-    const free = points.filter(([x, z]) => player.free(x, 0.01, z, 1.8));
+    let free = points.filter(([x, z]) => player.free(x, 0.01, z, 1.8));
+    const quiet = free.filter(([x, z]) => !world.buildings.some((b) => Math.hypot(b.x - x, b.z - z) < 46)); // not on an outpost's doorstep
+    if (quiet.length) free = quiet;
     const [sx, sz] = free[Math.floor(Math.random() * free.length)] || points[0];
     world.spawn.set(sx, 0, sz); world.spawnYaw = Math.atan2(sx, sz);
     // the two exits farthest from where you start, so every raid means crossing the map
@@ -634,8 +636,8 @@ export function init(ctx) {
       if (inZone && Math.floor(exitT) >= exitSec) { chime([440 + exitSec * 90], 0.05, 0.14, 0.16, 'square'); exitSec++; } else if (!inZone) exitSec = 0;
       // the longer you stay, the more guards arrive, and they are replaced faster
       const elapsed = RAID.time - timeLeft;
-      if (ctx.bots && phase === 0 && elapsed > 180) { phase = 1; ctx.bots.config.respawnDelay = 16; ctx.bots.setCount(RAID.bots + 1); toast('Reinforcements inbound', '#ff8a70'); chime([220, 196], 0.18, 0.4, 0.18, 'sawtooth'); }
-      if (ctx.bots && phase === 1 && elapsed > 320) { phase = 2; ctx.bots.config.respawnDelay = 9; ctx.bots.setCount(RAID.bots + 2); toast('Lockdown — the site is filling with guards', '#ff5a4a'); chime([220, 196, 165], 0.18, 0.5, 0.2, 'sawtooth'); }
+      if (ctx.bots && phase === 0 && elapsed > 270) { phase = 1; ctx.bots.config.respawnDelay = 16; ctx.bots.setCount(RAID.bots + 1); toast('Reinforcements inbound', '#ff8a70'); chime([220, 196], 0.18, 0.4, 0.18, 'sawtooth'); }
+      if (ctx.bots && phase === 1 && elapsed > 480) { phase = 2; ctx.bots.config.respawnDelay = 9; ctx.bots.setCount(RAID.bots + 2); toast('Lockdown — the site is filling with guards', '#ff5a4a'); chime([220, 196, 165], 0.18, 0.5, 0.2, 'sawtooth'); }
       // with three minutes left an emergency exit opens at the spare zone nearest to you
       if (!lateExit && timeLeft < 180) {
         lateExit = true;

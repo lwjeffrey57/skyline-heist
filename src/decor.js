@@ -465,7 +465,7 @@ export function init(ctx) {
     const put = (x, y, z, w, h, d, yaw, c) => { if (n >= N) return; m4.compose(V(x, y, z), q.setFromAxisAngle(V(0, 1, 0), yaw), V(w, h, d)); inst.setMatrixAt(n, m4); inst.setColorAt(n, c); n++; };
     const tones = [0x6d737d, 0x7a726a, 0x59616d, 0x857b6e, 0x4c535e, 0x637073, 0x8a8278];
     for (let i = 0; i < 120; i++) {
-      const near = i < 26, ang = r3() * Math.PI * 2, dist = near ? 135 + r3() * 45 : 200 + r3() * 300;
+      const near = i < 26, ang = r3() * Math.PI * 2, dist = near ? H + 65 + r3() * 45 : H + 130 + r3() * 300; // always beyond the wall, however large the site is
       const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist, yaw = r3() * Math.PI;
       const sunAz = Math.atan2(view.sunDir.z, view.sunDir.x), dAz = Math.abs(Math.atan2(Math.sin(ang - sunAz), Math.cos(ang - sunAz)));
       const w = 16 + r3() * 26, d = 16 + r3() * 26; let h = near ? 12 + r3() * 20 : 26 + r3() * r3() * 130 + (dist > 330 ? 30 : 0);

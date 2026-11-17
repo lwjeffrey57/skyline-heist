@@ -215,7 +215,7 @@ export function createSunRig(scene, sunDir, { color = 0xffe2bd, intensity = 3.4 
   const cascades = [
     { half: 13, fixed: false },
     { half: 42, fixed: false },
-    { half: 104, fixed: true },
+    { half: 168, fixed: true }, // covers the whole site
   ];
   const lights = cascades.map((c) => {
     const l = new THREE.DirectionalLight(color, intensity);
@@ -229,7 +229,7 @@ export function createSunRig(scene, sunDir, { color = 0xffe2bd, intensity = 3.4 
   // straight down, covers the arena; never lights anything (see shader patch)
   const sky = new THREE.DirectionalLight(0x000000, 0);
   sky.castShadow = true;
-  const SKY_HALF = 108; // covers the whole site, outer ring included
+  const SKY_HALF = 168; // covers the whole site, outer ring included
   Object.assign(sky.shadow.camera, { left: -SKY_HALF, right: SKY_HALF, top: SKY_HALF, bottom: -SKY_HALF, near: 1, far: 80 });
   sky.shadow.camera.updateProjectionMatrix();
   sky.position.set(0, 70, 0); sky.target.position.set(0, 0, 0);

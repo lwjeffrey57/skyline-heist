@@ -75,7 +75,7 @@ export function createWorld(scene, renderer) {
   const B = (tag) => ({ tag, destructible: true }); // building piece
 
   // ---- ground -------------------------------------------------------------
-  const ARENA = 100; // half-size of the whole walled site
+  const ARENA = 160; // half-size of the whole walled site (320 m across)
   const CORE = 70;   // half-size of the built-up centre; the ring outside it is open approach ground
   {
     const g = new THREE.PlaneGeometry(900, 900);
@@ -267,20 +267,33 @@ export function createWorld(scene, renderer) {
 
   // ---- outer ring: open ground between the wall and the built-up centre. You deploy at its edge, out of the fight.
   const E = ARENA - 8;
-  const spawnPoints = [[0, E], [-58, E], [58, E], [-E, 34], [E, 34], [-E, -34], [E, -34], [-58, -E], [0, -E], [58, -E], [-E, 0], [E, 0]];
-  const exitPoints = [[-E, 64], [E, -48], [0, -E], [E, 66], [-E, -50]];
+  const spawnPoints = [[0, E], [-90, E], [90, E], [-E, 60], [E, 60], [-E, -60], [E, -60], [-90, -E], [0, -E], [90, -E], [-E, 0], [E, 0]];
+  const exitPoints = [[-E, 105], [E, -80], [0, -E], [E, 110], [-E, -85]];
   const outbuildings = [];
   {
     const keepClear = spawnPoints.concat(exitPoints);
     const clearOf = (x0, x1, z0, z1, r) => !keepClear.some(([px, pz]) => px > x0 - r && px < x1 + r && pz > z0 - r && pz < z1 + r);
     // a few small sheds: cover on the way in, but no guards are posted in them and they hold no lockers
-    for (const [x, z] of [[-86, -66], [86, 12], [30, -87], [-34, 87], [84, -74], [-86, 60]]) {
+    for (const [x, z] of [[-140, -106], [140, 20], [48, -141], [-54, 141], [136, -120], [-140, 96], [10, 140], [-136, -20]]) {
       if (rand() < 0.45 || !clearOf(x - 6, x + 6, z - 5, z + 5, 6)) continue;
       building(x + jit(1), z + jit(1), 12, 10, 1, pick(ACCENTS));
       outbuildings.push(buildings.pop());
     }
+    // outposts: guarded buildings out in the ring, each with its own loot, so the site has more than one place worth raiding
+    const LOTS = [[105, 45], [-105, 45], [105, -45], [-105, -45], [45, 105], [-45, 105], [45, -105], [-45, -105]];
+    const order = LOTS.map((l) => [rand(), l]).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
+    for (const [ox, oz] of order.slice(0, 5)) {
+      const x = ox + jit(3), z = oz + jit(3);
+      building(x, z, rand() < 0.5 ? 14 : 12, rand() < 0.5 ? 12 : 10, rand() < 0.5 ? 1 : 2, pick(ACCENTS)); // stays in `buildings`: guards post here and it gets crates
+      for (let k = 0; k < 5; k++) {
+        const a = rand() * Math.PI * 2, d = 11 + rand() * 8, cx = x + Math.cos(a) * d, cz = z + Math.sin(a) * d, cont = rand() < 0.4, alongX = rand() < 0.5;
+        const bw = cont ? (alongX ? 6 : 2.4) : (alongX ? 3.4 : 0.6), bd = cont ? (alongX ? 2.4 : 6) : (alongX ? 0.6 : 3.4);
+        if (blocked(cx - bw / 2, cx + bw / 2, cz - bd / 2, cz + bd / 2, 1.2)) continue;
+        addBox(cx, 0, cz, bw, cont ? 2.6 : 1.15, bd, cont ? pick([M.rust, M.navy, M.teal, M.amber, M.cream]) : M.concrete, { tag: cont ? 'container' : 'cover', destructible: !cont });
+      }
+    }
     // scattered barriers, slabs and containers all the way round
-    for (let i = 0; i < 80; i++) {
+    for (let i = 0; i < 260; i++) {
       const side = Math.floor(rand() * 4), along = (rand() * 2 - 1) * (ARENA - 6), depth = CORE + 4 + rand() * (ARENA - CORE - 12);
       const x = side === 0 ? along : side === 1 ? along : side === 2 ? depth : -depth, z = side === 0 ? depth : side === 1 ? -depth : along;
       const kind = rand(); let bw, bh, bd, mat, tag, destructible = true;

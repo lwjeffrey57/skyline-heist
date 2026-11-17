@@ -17,7 +17,7 @@ export function init(ctx) {
   document.head.appendChild(style);
   const root = document.createElement('div'); root.id = 'mp'; root.hidden = true;
   root.innerHTML = `<div class="box"><h2>Map</h2><canvas width="${SIZE}" height="${SIZE}"></canvas>
-    <div class="lg"><span><i style="background:#9be37a"></i>Exit</span><span><i style="background:#d48bff"></i>Strongroom</span><span><i style="background:#ff6a00"></i>Arms locker (found)</span><span><i style="background:#35e0d8"></i>Jump pad</span><span><i style="background:#ffc56b"></i>Zipline</span><span><i style="background:#fff"></i>You</span><span style="margin-left:auto;opacity:.6">M to close</span></div></div>`;
+    <div class="lg"><span><i style="background:#9be37a"></i>Exit</span><span><i style="background:#d48bff"></i>Strongroom</span><span><i style="background:#ff6a00"></i>Arms locker (found)</span><span><i style="background:#35e0d8"></i>Jump pad</span><span><i style="background:#ffc56b"></i>Zipline</span><span><i style="background:#fff"></i>You</span><span>2F = floors</span><span style="margin-left:auto;opacity:.6">M to close</span></div></div>`;
   ctx.hud.appendChild(root);
   const g = root.querySelector('canvas').getContext('2d');
   const A = world.arenaHalf, HALF = A + 4, K = SIZE / (HALF * 2); // metres from centre to the wall, to the map edge, px per metre
@@ -43,13 +43,13 @@ export function init(ctx) {
     for (const b of world.buildings.concat(world.outbuildings || [])) {
       g.fillStyle = '#56616d'; g.fillRect(X(b.x - b.w / 2), Z(b.z - b.d / 2), b.w * K, b.d * K);
       g.strokeStyle = '#8b97a3'; g.strokeRect(X(b.x - b.w / 2) + 0.5, Z(b.z - b.d / 2) + 0.5, b.w * K, b.d * K);
-      g.fillStyle = 'rgba(255,255,255,.75)'; g.fillText(`${b.floors} floor${b.floors > 1 ? 's' : ''}`, X(b.x), Z(b.z));
+      g.fillStyle = 'rgba(255,255,255,.75)'; g.fillText(`${b.floors}F`, X(b.x), Z(b.z));
     }
     // perimeter
     g.strokeStyle = '#8b97a3'; g.lineWidth = 2; g.strokeRect(X(-A), Z(-A), A * 2 * K, A * 2 * K); g.lineWidth = 1;
     // district names
     g.font = '600 11px "Bahnschrift","Arial Narrow",sans-serif'; g.fillStyle = 'rgba(255,197,107,.8)';
-    for (const name in DISTRICT_AT) { const [x, z] = DISTRICT_AT[name]; g.fillText(name.toUpperCase(), X(x), Z(z) + (name === 'Plaza' ? 60 : 0)); }
+    for (const name in DISTRICT_AT) { const [dx, dz] = DISTRICT_AT[name], x = (dx / 46) * A * 0.72, z = (dz / 46) * A * 0.72; g.fillText(name.toUpperCase(), X(x), Z(z) + (name === 'Plaza' ? 26 : 0)); }
     // ziplines and pads
     g.strokeStyle = '#ffc56b'; for (const z of world.ziplines) { if (z.dead) continue; g.beginPath(); g.moveTo(X(z.a.x), Z(z.a.z)); g.lineTo(X(z.b.x), Z(z.b.z)); g.stroke(); }
     g.fillStyle = '#35e0d8'; for (const p of world.pads) { g.beginPath(); g.arc(X(p.x), Z(p.z), 4, 0, Math.PI * 2); g.fill(); }
