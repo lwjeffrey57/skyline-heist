@@ -1,7 +1,8 @@
 // Detection display: shows which guards are noticing you and how close they are to spotting you.
+// Rings only show while a guard is building or losing awareness; once it is fully alert its ring disappears.
 // Reads bot.awareness (0..1), bot.alertState ('unaware' | 'suspicious' | 'alert') and bot.role from the bots system.
 
-const RADIUS = 118, MAX = 8;
+const RADIUS = 118, MAX = 8, FLASH = 0.7;
 const COLORS = { unaware: '#ffffff', suspicious: '#ffd24a', alert: '#ff5a4a' };
 
 export function init(ctx) {
@@ -28,11 +29,19 @@ export function init(ctx) {
       let n = 0, worst = 'unaware', top = 0;
       for (const b of bots) {
         if (!b.alive) continue;
-        const aw = b.alertState === 'alert' ? 1 : Math.max(0, Math.min(1, b.awareness || 0));
-        if (aw < 0.04) continue;
-        const st = b.alertState || (aw >= 1 ? 'alert' : 'unaware');
-        if (st === 'alert' || (st === 'suspicious' && worst !== 'alert')) worst = st;
-        top = Math.max(top, aw);
+        const st = b.alertState || 'unaware';
+        const aw = st === 'alert' ? 1 : Math.max(0, Math.min(1, b.awareness || 0));
+        if (st === 'alert') {
+          // fully detected: the ring flashes red once, then goes away. It no longer points at a guard who is fighting you.
+          worst = 'alert';
+          if (b._dtAlertAt == null) b._dtAlertAt = ctx.time;
+          if (ctx.time - b._dtAlertAt > FLASH) continue;
+        } else {
+          b._dtAlertAt = null; // lost you: once its awareness starts to drop, the ring comes back
+          if (aw < 0.04) continue;
+          if (st === 'suspicious' && worst !== 'alert') worst = st;
+          top = Math.max(top, aw);
+        }
         if (n >= MAX) continue;
         const dx = b.pos.x - player.pos.x, dz = b.pos.z - player.pos.z;
         const ang = Math.atan2(dx * cos - dz * sin, -dx * sin - dz * cos); // 0 = straight ahead, + = to the right
