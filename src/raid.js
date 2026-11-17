@@ -44,7 +44,17 @@ const CONTRACTS = [
   { id: 'rare', text: 'Extract with a rare item or better', pay: 300, check: (s) => s.pack.some((i) => i.tier === 'rare' || i.tier === 'epic') },
   { id: 'ghost', text: 'Extract without ever being detected', pay: 500, check: (s) => !s.detected },
   { id: 'fast', text: 'Extract within 4 minutes', pay: 300, check: (s) => s.elapsed <= 240 },
+  { id: 'district', text: 'Search 3 containers in one district', goal: 3, pay: 300, ev: 'loot', inc: () => 0 }, // given a district when rolled
 ];
+// Districts: the arena is five named areas, each with its own kind of loot.
+const DISTRICTS = {
+  Plaza: 'the strongroom', Depot: 'supplies', Exchange: 'better valuables', Works: 'fuller crates', 'Freight Row': 'a mix',
+};
+function districtAt(x, z) {
+  if (Math.abs(x) < 17 && Math.abs(z) < 17) return 'Plaza';
+  if (Math.abs(z) >= Math.abs(x)) return z > 0 ? 'Depot' : 'Freight Row';
+  return x > 0 ? 'Exchange' : 'Works';
+}
 const EXITS = [[-62, 42], [62, -30], [0, -64], [62, 50], [-62, -30]];
 const SPAWNS = [[0, 50], [-48, 58], [48, 58], [-62, 20], [62, 22], [-62, -20], [62, -10], [-40, -60], [0, -60], [36, -60], [-20, 60], [26, 46]];
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -147,6 +157,7 @@ export function init(ctx) {
   }
   const TIER_SOUND = { common: [[620]], uncommon: [[620, 830]], rare: [[620, 830, 1110], 0.07, 0.24, 0.2], epic: [[620, 830, 1110, 1480, 1860], 0.08, 0.4, 0.24] };
   let contracts = [], detected = false;
+  let doorT = 0;
   let keycards = 0, phase = 0, lateExit = false, exitSec = 0; // keycards open vault cases; the raid escalates in phases
   let reveal = null; // the container being emptied, one item at a time
   const brought = new Set(); let broughtMed = 0, menu = null; // weapons and medkits taken in from the loadout
@@ -169,7 +180,7 @@ export function init(ctx) {
       const seam = new THREE.Mesh(geoLockerDoor, m.dead); seam.position.set(0, 0.9, 0.255); g.add(seam);
       const band = new THREE.Mesh(geoLockerStrip, m.glow); band.position.y = 1.62; g.add(band);
       g.position.set(x, y, z); g.rotation.y = yaw; scene.add(g);
-      const L = { kind, group: g, lid: null, strip: band, items: contents || [], opened: false, pos: g.position, born: ctx.time, vy: 0 };
+      const L = { kind, group: g, lid: null, strip: band, items: contents || [], opened: false, pos: g.position, born: ctx.time, vy: 0, district: districtAt(x, z) };
       lootables.push(L); return L;
     }
     const body = new THREE.Mesh(kind === 'bag' ? geoBag : geoBody, m.body); body.position.y = kind === 'bag' ? 0.17 : 0.25;
@@ -178,7 +189,12 @@ export function init(ctx) {
     if (kind !== 'bag') { lid = new THREE.Mesh(geoLid, m.body); lid.position.set(0, 0.55, 0); lid.castShadow = true; g.add(lid); }
     const strip = new THREE.Mesh(geoStrip, m.glow); strip.position.y = kind === 'bag' ? 0.3 : 0.4; if (kind === 'bag') strip.scale.set(0.56, 0.6, 0.6); g.add(strip);
     g.position.set(x, y, z); g.rotation.y = yaw; scene.add(g);
-    const L = { kind, group: g, lid, strip, items: rollContents(kind), opened: false, pos: g.position, born: ctx.time, vy: 0 };
+    const L = { kind, group: g, lid, strip, items: rollContents(kind), opened: false, pos: g.position, born: ctx.time, vy: 0, district: districtAt(x, z) };
+    if (kind === 'standard' || kind === 'secure') { // each district's crates lean a different way
+      if (L.district === 'Depot') L.items = L.items.map((it) => (it.tier === 'common' && Math.random() < 0.6 ? [{ supply: 'medkit', name: 'Medkit' }, { supply: 'ammo', name: 'Ammo box' }, { supply: 'armor', name: 'Armour plate' }][Math.floor(Math.random() * 3)] : it));
+      else if (L.district === 'Exchange') L.items = L.items.map((it) => (it.tier === 'common' ? rollItem(3.2) : it));
+      else if (L.district === 'Works') L.items.push(rollItem(1.2), rollItem(1.2));
+    }
     lootables.push(L); return L;
   }
   function clearLootables() { for (const L of lootables) L.group.removeFromParent(); lootables.length = 0; }
@@ -194,7 +210,7 @@ export function init(ctx) {
         const y = f * b.floorHeight, kind = f === 0 ? 'standard' : 'secure';
         for (const [sx, sz] of [[-1, -1], [1, 1], [-1, 1], [1, -1]]) if (Math.random() < (f === 0 ? 0.28 : 0.32)) spots.push([kind, b.x + sx * ix, y, b.z + sz * iz]);
       }
-      spots.push([b.floors >= 3 ? 'vault' : 'secure', b.x + rnd(-2, 2), b.roofY, b.z - b.d / 2 + 2.2, true]);
+      spots.push([b.floors >= 3 && !world.strongroom ? 'vault' : 'secure', b.x + rnd(-2, 2), b.roofY, b.z - b.d / 2 + 2.2, true]);
     }
     for (const [x, z] of [[-9, 26], [44, 9], [-54, 5], [10, -44], [-10, -40], [52, -46], [-56, -36], [3, 4.5], [-4.5, -3], [30, 40], [-40, 12], [20, -4]]) spots.push(['standard', x, 0, z]);
     // arms lockers: one on the top floor of five random buildings, each holding a weapon you did not deploy with
@@ -207,11 +223,13 @@ export function init(ctx) {
       addLootable('locker', x, floorBelow(x, y + 0.4, z), z, Math.PI, items);
     });
     // every raid has at least one vault case: if no tall building rolled one, a rooftop crate is promoted
-    if (!spots.some((s) => s[0] === 'vault')) { const roofs = spots.filter((s) => s[4]); if (roofs.length) roofs[Math.floor(Math.random() * roofs.length)][0] = 'vault'; }
+    if (world.strongroom) { const [a, b] = world.strongroom.inside; spots.push(['vault', a[0], a[1], a[2]], ['secure', b[0], b[1], b[2]]); }
+    else if (!spots.some((s) => s[0] === 'vault')) { const roofs = spots.filter((s) => s[4]); if (roofs.length) roofs[Math.floor(Math.random() * roofs.length)][0] = 'vault'; }
     for (const [kind, x, y, z] of spots) {
       if (!player.free(x, y + 0.75, z, 0.5)) continue; // something solid is in the way
       const L = addLootable(kind, x, floorBelow(x, y + 0.4, z), z, Math.random() * Math.PI);
-      if (kind === 'vault') { L.locked = true; if (Math.random() < 0.25) L.items.push({ name: 'Black Ledger', tier: 'epic', value: 2500 }); }
+      if (kind === 'vault') { L.locked = !world.strongroom; // behind the strongroom door, the case itself is not locked
+        if (Math.random() < 0.25) L.items.push({ name: 'Black Ledger', tier: 'epic', value: 2500 }); }
     }
     // vault cases are locked: one keycard is hidden in a secure crate (heavies and marksmen sometimes carry one too)
     const secure = lootables.filter((L) => L.kind === 'secure');
@@ -227,7 +245,7 @@ export function init(ctx) {
       return true;
     }
     if (item.supply === 'ammoFull') { if (ctx.weapons && ctx.weapons.addAmmo) ctx.weapons.addAmmo(1); return true; }
-    if (item.supply === 'key') { keycards++; chime([880, 1175, 1568], 0.07, 0.3, 0.2); toast('+ Keycard <span style="opacity:.7">opens a vault case</span>', '#d48bff'); return true; }
+    if (item.supply === 'key') { keycards++; chime([880, 1175, 1568], 0.07, 0.3, 0.2); toast('+ Keycard <span style="opacity:.7">opens the strongroom on the plaza</span>', '#d48bff'); return true; }
     if (item.supply) chime([440], 0.05, 0.1, 0.12, 'square');
     if (item.supply === 'medkit') { if (medkits >= 4) return false; medkits++; toast('+ Medkit', '#9be37a'); return true; }
     if (item.supply === 'armor') { if (armor >= 100) return false; armor = Math.min(100, armor + 40); toast('+ Armour plate', '#7fb4ff'); return true; }
@@ -253,13 +271,19 @@ export function init(ctx) {
     const { L, left } = reveal; reveal = null; L.busy = false; L.items = left;
     if (left.length) toast('Pack full — left the cheaper items behind', '#ff8a70');
     else { L.opened = true; L.strip.material = mats(L.kind).dead; if (L.lid) { L.lid.rotation.z = 0.9; L.lid.position.set(-0.36, 0.72, 0); } if (L.kind === 'bag') L.group.visible = false; }
-    events.emit('lootTaken', { kind: L.kind });
+    events.emit('lootTaken', { kind: L.kind, district: L.district });
   }
 
   // ---- contracts ----------------------------------------------------------
   function rollContracts() {
     const pool = CONTRACTS.slice().sort(() => Math.random() - 0.5);
-    contracts = pool.slice(0, 2).map((def) => ({ def, n: 0, done: false }));
+    contracts = pool.slice(0, 2).map((def) => {
+      if (def.id === 'district') { // point this one at a district picked for the raid
+        const names = Object.keys(DISTRICTS).filter((n) => n !== 'Plaza'), name = names[Math.floor(Math.random() * names.length)];
+        def = { ...def, text: `Search 3 containers in ${name === 'Freight Row' ? name : `the ${name}`}`, inc: (e) => (e.district === name ? 1 : 0) };
+      }
+      return { def, n: 0, done: false };
+    });
   }
   const raidState = () => ({ value: packValue(), pack, detected, elapsed: RAID.time - timeLeft });
   const met = (c) => (c.def.check ? c.def.check(raidState()) : c.n >= c.def.goal);
@@ -520,6 +544,19 @@ export function init(ctx) {
           if (!reveal.queue.length) finishReveal();
         }
       }
+      // the strongroom door: a keycard opens it, and opening it brings reinforcements at once
+      const sr = world.strongroom;
+      if (sr && !sr.open && !target && Math.hypot(player.pos.x - sr.x, player.pos.z - sr.z) < 2.3 && Math.abs(player.pos.y - sr.y) < 1.2) {
+        if (keycards > 0 && input.down('KeyF')) {
+          doorT += dt;
+          if (doorT >= 1.5) {
+            sr.open = true; keycards--; doorT = 0; world.removeCollider(sr.door);
+            toast('Strongroom open — the alarm is calling guards in', '#d48bff'); chime([330, 440, 330, 440], 0.16, 0.3, 0.22, 'sawtooth');
+            if (ctx.bots && phase === 0) { phase = 1; ctx.bots.config.respawnDelay = 16; ctx.bots.setCount(RAID.bots + 1); }
+          }
+        } else doorT = 0;
+        if (!player.prompt) player.prompt = keycards > 0 ? 'Hold <b>F</b> — use keycard on the strongroom door' : 'Strongroom sealed — needs a <b>keycard</b>';
+      } else doorT = 0;
       const lockedOut = target && target.locked && keycards <= 0;
       if (target && !lockedOut && input.down('KeyF')) {
         holdT += dt;
@@ -545,17 +582,17 @@ export function init(ctx) {
       }
       if (exitT >= RAID.extractHold) { endRaid('extracted'); return; }
 
-      const showBar = inZone || holdT > 0 || !!reveal;
+      const showBar = inZone || holdT > 0 || !!reveal || doorT > 0;
       hold.hidden = !showBar;
       if (showBar) {
-        hold.firstChild.textContent = inZone ? `Extracting ${(RAID.extractHold - exitT).toFixed(1)}s` : holdT > 0 ? 'Searching' : 'Looting';
-        const frac = inZone ? exitT / RAID.extractHold : holdT > 0 && target ? holdT / CRATES[target.kind].time : reveal ? 1 - reveal.queue.length / Math.max(1, reveal.total) : 0;
+        hold.firstChild.textContent = inZone ? `Extracting ${(RAID.extractHold - exitT).toFixed(1)}s` : holdT > 0 ? 'Searching' : doorT > 0 ? 'Opening' : 'Looting';
+        const frac = doorT > 0 ? doorT / 1.5 : inZone ? exitT / RAID.extractHold : holdT > 0 && target ? holdT / CRATES[target.kind].time : reveal ? 1 - reveal.queue.length / Math.max(1, reveal.total) : 0;
         hold.querySelector('i').style.width = `${Math.min(1, frac) * 100}%`;
       }
       updateMarkers();
 
       const m = Math.floor(timeLeft / 60), s = Math.floor(timeLeft % 60);
-      line.innerHTML = `${m}:${String(s).padStart(2, '0')}<span>·</span>Pack ${pack.length}/${packSize()}<span>·</span>${packValue()} cr`;
+      line.innerHTML = `<b style="color:#ffc56b;font-weight:600">${districtAt(player.pos.x, player.pos.z).toUpperCase()}</b><span>·</span>${m}:${String(s).padStart(2, '0')}<span>·</span>Pack ${pack.length}/${packSize()}<span>·</span>${packValue()} cr`;
       line.style.color = timeLeft < 60 ? '#ff8a70' : '#fff';
       const shielded = player.protectT > 0; sub.hidden = !shielded;
       if (shielded) sub.textContent = `Shielded ${player.protectT.toFixed(1)}s`;

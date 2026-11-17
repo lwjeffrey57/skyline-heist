@@ -181,8 +181,21 @@ export function createWorld(scene, renderer) {
       addBox(s * (7 + 0.2 + i * 0.4), 0, 0, 0.4, 0.75 - i * 0.25, 6, M.concreteDark);
     }
   }
-  addBox(0, 1.0, 0, 2.2, 3.2, 2.2, M.navy);
-  addBox(0, 4.2, 0, 2.6, 0.12, 2.6, M.glowAmber, { solid: false, shadow: false });
+  // the strongroom: a sealed bunker on the plaza. Its walls cannot be breached; the door opens with a keycard (raid.js)
+  let strongroom = null;
+  {
+    const Y = 1.0, H = 3.0, T = 0.4, tag = { tag: 'bunker' };
+    addBox(0, Y, -2.8, 8, H, T, M.concreteDark, tag);                       // north wall
+    addBox(-3.8, Y, 0, T, H, 5.2, M.concreteDark, tag); addBox(3.8, Y, 0, T, H, 5.2, M.concreteDark, tag); // west, east
+    addBox(-2.4, Y, 2.8, 3.2, H, T, M.concreteDark, tag); addBox(2.4, Y, 2.8, 3.2, H, T, M.concreteDark, tag); // south, either side of the door
+    addBox(0, Y + 2.3, 2.8, 1.6, H - 2.3, T, M.concreteDark, tag);          // lintel
+    addBox(0, Y + H, 0, 8.4, 0.3, 6.4, M.slab, tag);                        // roof
+    addBox(0, Y + H + 0.3, 2.9, 8.4, 0.1, 0.2, M.glowAmber, { solid: false, shadow: false });
+    addBox(0, Y + H - 0.08, 0, 3, 0.06, 0.2, M.glowAmber, { solid: false, shadow: false }); // light strip inside
+    const door = addBox(0, Y, 2.8, 1.6, 2.3, 0.24, M.metal, { tag: 'door' });
+    addBox(0, Y + 1.15, 2.93, 1.2, 0.08, 0.02, M.glowAmber, { solid: false, shadow: false, attachTo: door });
+    strongroom = { door: door.userData.collider, x: 0, y: Y, z: 2.8, open: false, inside: [[-2.3, Y, -1.5], [2.2, Y, -1.4]] };
+  }
   addBox(-4.5, 1.0, -4.5, 3, 1.1, 0.4, M.concrete);
   addBox(4.5, 1.0, 4.5, 3, 1.1, 0.4, M.concrete);
 
@@ -296,7 +309,7 @@ export function createWorld(scene, renderer) {
 
   // ---- queries & edits used by the other systems ---------------------------
   const world = {
-    colliders, pads, ziplines, buildings, materials: M, arenaHalf: ARENA, seed,
+    colliders, pads, ziplines, buildings, materials: M, arenaHalf: ARENA, seed, strongroom,
     spawn: new THREE.Vector3(0, 0, 50),
     // nearest solid box along a ray -> { collider, point, normal, dist } or null
     raycast(origin, dir, maxDist = 500) {
