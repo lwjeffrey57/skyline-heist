@@ -17,7 +17,7 @@ export function init(ctx) {
   document.head.appendChild(style);
   const root = document.createElement('div'); root.id = 'mp'; root.hidden = true;
   root.innerHTML = `<div class="box"><h2>Map</h2><canvas width="${SIZE}" height="${SIZE}"></canvas>
-    <div class="lg"><span><i style="background:#9be37a"></i>Exit</span><span><i style="background:#d48bff"></i>Strongroom</span><span><i style="background:#ff6a00"></i>Arms locker (found)</span><span><i style="background:#35e0d8"></i>Jump pad</span><span><i style="background:#ffc56b"></i>Zipline</span><span><i style="background:#fff"></i>You</span><span>2F = floors</span><span style="margin-left:auto;opacity:.6">M to close</span></div></div>`;
+    <div class="lg"><span><i style="background:#9be37a"></i>Exit</span><span><i style="background:#d48bff"></i>Key exit / strongroom</span><span><i style="background:#ffc56b"></i>Beacon exit / zipline</span><span><i style="background:#ff6a00"></i>Arms locker (found)</span><span><i style="background:#35e0d8"></i>Jump pad</span><span><i style="background:#fff"></i>You</span><span>2F = floors</span><span style="margin-left:auto;opacity:.6">M to close</span></div></div>`;
   ctx.hud.appendChild(root);
   const g = root.querySelector('canvas').getContext('2d');
   const A = world.arenaHalf, HALF = A + 4, K = SIZE / (HALF * 2); // metres from centre to the wall, to the map edge, px per metre
@@ -44,6 +44,7 @@ export function init(ctx) {
       g.fillStyle = '#56616d'; g.fillRect(X(b.x - b.w / 2), Z(b.z - b.d / 2), b.w * K, b.d * K);
       g.strokeStyle = '#8b97a3'; g.strokeRect(X(b.x - b.w / 2) + 0.5, Z(b.z - b.d / 2) + 0.5, b.w * K, b.d * K);
       g.fillStyle = 'rgba(255,255,255,.75)'; g.fillText(`${b.floors}F`, X(b.x), Z(b.z));
+      if (b.outpost) { g.fillStyle = '#7fd6ff'; g.fillText(b.outpost === 'depot' ? 'SUPPLY DUMP' : b.outpost.toUpperCase(), X(b.x), Z(b.z + b.d / 2) + 9); // 'Depot' is already a district }
     }
     // perimeter
     g.strokeStyle = '#8b97a3'; g.lineWidth = 2; g.strokeRect(X(-A), Z(-A), A * 2 * K, A * 2 * K); g.lineWidth = 1;
@@ -63,9 +64,11 @@ export function init(ctx) {
     if (raid) for (const zn of raid.zones) {
       if (!zn.active) continue;
       const x = X(Math.max(-A + 2, Math.min(A - 2, zn.x))), z = Z(Math.max(-A + 2, Math.min(A - 2, zn.z)));
-      g.save(); g.translate(x, z); g.rotate(Math.PI / 4); g.fillStyle = '#9be37a'; g.fillRect(-6, -6, 12, 12); g.restore();
-      g.fillStyle = '#9be37a'; g.fillText('EXIT', x, z + (zn.z > 0 ? -15 : 15));
+      g.save(); g.translate(x, z); g.rotate(Math.PI / 4); g.fillStyle = zn.css || '#9be37a'; g.fillRect(-6, -6, 12, 12); g.restore();
+      g.fillStyle = zn.css || '#9be37a'; g.fillText(zn.title || 'EXIT', x, z + (zn.z > 0 ? -15 : 15));
     }
+    // guards and drones, while a signal terminal's tap lasts
+    if (raid && raid.revealT > 0) { g.fillStyle = '#ff5a4a'; for (const b of (ctx.bots ? ctx.bots.list : []).concat(ctx.drones ? ctx.drones.list : [])) if (b.alive) { g.beginPath(); g.arc(X(b.pos.x), Z(b.pos.z), 3.5, 0, Math.PI * 2); g.fill(); } }
     // you: an arrow pointing where you face
     g.save(); g.translate(X(player.pos.x), Z(player.pos.z)); g.rotate(-player.yaw);
     g.fillStyle = '#fff'; g.strokeStyle = '#000'; g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 7); g.lineTo(0, 3); g.lineTo(-6, 7); g.closePath(); g.fill(); g.stroke(); g.restore();

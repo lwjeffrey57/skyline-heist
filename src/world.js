@@ -282,9 +282,11 @@ export function createWorld(scene, renderer) {
     // outposts: guarded buildings out in the ring, each with its own loot, so the site has more than one place worth raiding
     const LOTS = [[105, 45], [-105, 45], [105, -45], [-105, -45], [45, 105], [-45, 105], [45, -105], [-45, -105]];
     const order = LOTS.map((l) => [rand(), l]).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
+    const TYPES = ['armoury', 'infirmary', 'signal', 'depot', 'watch'].map((t) => [rand(), t]).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
     for (const [ox, oz] of order.slice(0, 5)) {
       const x = ox + jit(3), z = oz + jit(3);
       building(x, z, rand() < 0.5 ? 14 : 12, rand() < 0.5 ? 12 : 10, rand() < 0.5 ? 1 : 2, pick(ACCENTS)); // stays in `buildings`: guards post here and it gets crates
+      buildings[buildings.length - 1].outpost = TYPES.pop(); // each outpost has a purpose (raid.js gives it its contents)
       for (let k = 0; k < 5; k++) {
         const a = rand() * Math.PI * 2, d = 11 + rand() * 8, cx = x + Math.cos(a) * d, cz = z + Math.sin(a) * d, cont = rand() < 0.4, alongX = rand() < 0.5;
         const bw = cont ? (alongX ? 6 : 2.4) : (alongX ? 3.4 : 0.6), bd = cont ? (alongX ? 2.4 : 6) : (alongX ? 0.6 : 3.4);

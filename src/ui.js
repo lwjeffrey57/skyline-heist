@@ -24,7 +24,7 @@ export function init(ctx) {
     #ui-compass .mid { position: absolute; left: 50%; top: 0; width: 2px; height: 11px; margin-left: -1px; background: #ffc56b; }
     #ui-compass span { position: absolute; top: 10px; transform: translateX(-50%); font-size: 11px; letter-spacing: 2px; color: rgba(255,255,255,.7); text-shadow: 0 1px 3px rgba(0,0,0,.8); white-space: nowrap; }
     #ui-compass span.exit { color: #9be37a; font-weight: 700; }
-    #ui-compass span.exit::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 5px; border: 2px solid #9be37a; transform: rotate(45deg) translateY(-1px); }
+    #ui-compass span.exit::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 5px; border: 2px solid var(--ex, #9be37a); transform: rotate(45deg) translateY(-1px); }
     #ui-compass span.edge { opacity: .55; }
     #rd-top { top: 46px; }
     #rd-top .mode { display: none; }
@@ -92,7 +92,7 @@ export function init(ctx) {
       exits.forEach((el, i) => {
         const z = zones[i]; if (!z) { el.hidden = true; return; }
         const dx = z.x - player.pos.x, dz = z.z - player.pos.z;
-        el.textContent = `EXIT ${Math.round(Math.hypot(dx, dz))}m`;
+        el.textContent = `${z.title || 'EXIT'} ${Math.round(Math.hypot(dx, dz))}m`; el.style.color = z.css || ''; el.style.setProperty('--ex', z.css || '#9be37a');
         el.style.top = i ? '22px' : '10px'; // each exit on its own row so the labels can never collide
         place(el, rel(dx, dz, sin, cos), true, i);
       });
