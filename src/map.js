@@ -71,7 +71,7 @@ export function init(ctx) {
       g.fillStyle = zn.css || '#9be37a'; g.fillText(zn.title || 'EXIT', x, z + (zn.z > 0 ? -15 : 15));
     }
     // guards and drones, while a signal terminal's tap lasts
-    if (raid && raid.revealT > 0) { g.fillStyle = '#ff5a4a'; for (const b of (ctx.bots ? ctx.bots.list : []).concat(ctx.drones ? ctx.drones.list : [])) if (b.alive) { g.beginPath(); g.arc(X(b.pos.x), Z(b.pos.z), 3.5, 0, Math.PI * 2); g.fill(); } }
+    if (raid && raid.revealT > 0) { g.fillStyle = '#ff5a4a'; for (const b of (ctx.bots ? ctx.bots.list : []).concat(ctx.drones ? ctx.drones.list : [], ctx.turrets ? ctx.turrets.list : [])) if (b.alive) { g.beginPath(); g.arc(X(b.pos.x), Z(b.pos.z), 3.5, 0, Math.PI * 2); g.fill(); } }
     // you: an arrow pointing where you face
     g.save(); g.translate(X(player.pos.x), Z(player.pos.z)); g.rotate(-player.yaw);
     g.fillStyle = '#fff'; g.strokeStyle = '#000'; g.beginPath(); g.moveTo(0, -9); g.lineTo(6, 7); g.lineTo(0, 3); g.lineTo(-6, 7); g.closePath(); g.fill(); g.stroke(); g.restore();

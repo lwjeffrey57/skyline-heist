@@ -456,7 +456,7 @@ export function init(ctx) {
     if (state !== 'raid' || !e.point) return;
     if (e.by === player) { // progress on trader tasks
       if (e.bot && e.bot.kind === 'drone') bump(stash, 'droneKill'); else if (e.bot && e.bot.kind === 'heavy') bump(stash, 'heavyKill');
-      if (ctx.weapons && ctx.weapons.current && ctx.weapons.current.def.id === 'pistol' && !(e.bot && e.bot.kind === 'drone')) bump(stash, 'pistolKill');
+      if (ctx.weapons && ctx.weapons.current && ctx.weapons.current.def.id === 'pistol' && !(e.bot && (e.bot.kind === 'drone' || e.bot.kind === 'turret'))) bump(stash, 'pistolKill');
     }
     // tougher enemy types carry better loot
     const rich = e.bot && (e.bot.kind === 'heavy' || e.bot.kind === 'marksman');
