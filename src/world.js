@@ -269,7 +269,7 @@ export function createWorld(scene, renderer) {
   const E = ARENA - 8;
   const spawnPoints = [[0, E], [-90, E], [90, E], [-E, 60], [E, 60], [-E, -60], [E, -60], [-90, -E], [0, -E], [90, -E], [-E, 0], [E, 0]];
   const exitPoints = [[-E, 105], [E, -80], [0, -E], [E, 110], [-E, -85]];
-  const outbuildings = [], roads = [], compoundWalls = [];
+  const outbuildings = [], roads = [], compoundWalls = [], towerZips = [];
   // ---- the compound's bones: an inner wall with gates around the centre, and roads from the outer wall to those gates
   {
     const IW = CORE + 3, PANELS = 18, plen = (IW * 2) / PANELS, WH = 4.2;
@@ -331,6 +331,21 @@ export function createWorld(scene, renderer) {
         addBox(cx, 0, cz, bw, cont ? 2.6 : 1.15, bd, cont ? pick([M.rust, M.navy, M.teal, M.amber, M.cream]) : M.concrete, { tag: cont ? 'container' : 'cover', destructible: !cont });
       }
     }
+    // tower blocks: two of the lots the outposts did not take get a large multi-storey building with rooms on every
+    // floor, and a zipline from its roof down into the centre
+    for (const [ox, oz] of order.slice(5, 7)) {
+      const x = ox + jit(2), z = oz + jit(2), W2 = 22, D2 = 18, floors = rand() < 0.4 ? 5 : 4;
+      building(x, z, W2, D2, floors, pick(ACCENTS));
+      const b = buildings[buildings.length - 1]; b.tower = true;
+      for (let f = 0; f < floors; f++) for (const sx of [-1, 1]) for (const [z0, z1] of [[-8.7, -4.1], [-2.3, 2.3], [4.1, 8.7]]) // partition walls with doorways, either side of the stair core
+        addBox(x + sx * 7, f * FH, z + (z0 + z1) / 2, 0.25, FH - SLAB, z1 - z0, M.concrete, B('wall'));
+      const dl = Math.hypot(x, z) || 1, dx = -x / dl, dz = -z / dl; // toward the middle of the compound
+      for (const reach of [50, 42, 34]) {
+        const ex = x + dx * reach, ez = z + dz * reach;
+        if (blocked(ex - 0.6, ex + 0.6, ez - 0.6, ez + 0.6, 1.5)) continue;
+        towerZips.push([new THREE.Vector3(x + dx * 8, b.roofY + 3.4, z + dz * 6.5), new THREE.Vector3(ex, 5.6, ez), b.roofY]); break;
+      }
+    }
     // scattered barriers, slabs and containers all the way round
     for (let i = 0; i < 260; i++) {
       const side = Math.floor(rand() * 4), along = (rand() * 2 - 1) * (ARENA - 6), depth = CORE + 4 + rand() * (ARENA - CORE - 12);
@@ -387,6 +402,7 @@ export function createWorld(scene, renderer) {
   zipline(new THREE.Vector3(-19.2, roofA + 3.4, -4), new THREE.Vector3(19.2, roofB + 3.4, -13), roofA, roofB);
   zipline(new THREE.Vector3(-25.2, roofD + 3.4, 27.2), new THREE.Vector3(-3, 5.6, 9.5), roofD, 0);
   zipline(new THREE.Vector3(33, roofB + 3.4, -12.2), new THREE.Vector3(46, 8.6, 20), roofB, 0);
+  for (const [a, b, roofY] of towerZips) zipline(a, b, roofY, 0);
 
   // ---- distant skyline (visual only) --------------------------------------
   const skyRand = rng(99);

@@ -47,6 +47,7 @@ export function init(ctx) {
       g.fillStyle = '#56616d'; g.fillRect(X(b.x - b.w / 2), Z(b.z - b.d / 2), b.w * K, b.d * K);
       g.strokeStyle = '#8b97a3'; g.strokeRect(X(b.x - b.w / 2) + 0.5, Z(b.z - b.d / 2) + 0.5, b.w * K, b.d * K);
       g.fillStyle = 'rgba(255,255,255,.75)'; g.fillText(`${b.floors}F`, X(b.x), Z(b.z));
+      if (b.tower) { g.fillStyle = '#ffc56b'; g.fillText('TOWER', X(b.x), Z(b.z + b.d / 2) + 9); }
       if (b.outpost) { g.fillStyle = '#7fd6ff'; g.fillText(b.outpost === 'depot' ? 'SUPPLY DUMP' : b.outpost.toUpperCase(), X(b.x), Z(b.z + b.d / 2) + 9); }
     }
     // perimeter
