@@ -130,7 +130,9 @@ export function createWorld(scene, renderer) {
   }
 
   const buildings = [];
+  const lod = []; // per building: the interior meshes that need not be drawn from far away
   function building(x, z, w, d, floors, accent) {
+    const first = colliders.length;
     const x0 = x - w / 2, x1 = x + w / 2, z0 = z - d / 2, z1 = z + d / 2;
     const hx0 = x - 2.7, hx1 = x + 2.7;
     for (let f = 0; f < floors; f++) {
@@ -165,6 +167,7 @@ export function createWorld(scene, renderer) {
     addBox(x1 - T / 2, ry, z, T, 1.0, d - T * 2, M.concrete, B('parapet'));
     addBox(x, ry + 1.0, z0 + T / 2, w, 0.06, T + 0.04, accent === M.teal ? M.glowTeal : M.glowAmber, { solid: false, shadow: false, attachTo: front });
     buildings.push({ x, z, w, d, floors, floorHeight: FH, wallThickness: T, roofY: ry, accent });
+    lod.push({ x, z, far: false, meshes: colliders.slice(first).filter((c) => c.tag === 'stair' || (c.tag === 'slab' && c.max.y < ry - 0.1)).map((c) => c.mesh) });
     return ry;
   }
 
@@ -333,19 +336,23 @@ export function createWorld(scene, renderer) {
     }
     // tower blocks: two of the lots the outposts did not take get a large multi-storey building with rooms on every
     // floor, and a zipline from its roof down into the centre
-    for (const [ox, oz] of order.slice(5, 7)) {
-      const x = ox + jit(2), z = oz + jit(2), W2 = 22, D2 = 18, floors = rand() < 0.4 ? 5 : 4;
+    const tower = (x, z, W2, D2, floors) => {
       building(x, z, W2, D2, floors, pick(ACCENTS));
       const b = buildings[buildings.length - 1]; b.tower = true;
-      for (let f = 0; f < floors; f++) for (const sx of [-1, 1]) for (const [z0, z1] of [[-8.7, -4.1], [-2.3, 2.3], [4.1, 8.7]]) // partition walls with doorways, either side of the stair core
-        addBox(x + sx * 7, f * FH, z + (z0 + z1) / 2, 0.25, FH - SLAB, z1 - z0, M.concrete, B('wall'));
+      const h = D2 / 2 - 0.3, px = Math.round(W2 / 3.2);
+      for (let f = 0; f < floors; f++) for (const sx of [-1, 1]) for (const [z0, z1] of [[-h, -4.1], [-2.3, 2.3], [4.1, h]]) // partition walls with doorways, either side of the stair core
+        lod[lod.length - 1].meshes.push(addBox(x + sx * px, f * FH, z + (z0 + z1) / 2, 0.25, FH - SLAB, z1 - z0, M.concrete, B('wall')));
       const dl = Math.hypot(x, z) || 1, dx = -x / dl, dz = -z / dl; // toward the middle of the compound
       for (const reach of [50, 42, 34]) {
         const ex = x + dx * reach, ez = z + dz * reach;
-        if (blocked(ex - 0.6, ex + 0.6, ez - 0.6, ez + 0.6, 1.5)) continue;
-        towerZips.push([new THREE.Vector3(x + dx * 8, b.roofY + 3.4, z + dz * 6.5), new THREE.Vector3(ex, 5.6, ez), b.roofY]); break;
+        if (blocked(ex - 0.6, ex + 0.6, ez - 0.6, ez + 0.6, 1.5) || onRoad(ex - 1, ex + 1, ez - 1, ez + 1)) continue;
+        towerZips.push([new THREE.Vector3(x + dx * (W2 / 2 - 3), b.roofY + 3.4, z + dz * (D2 / 2 - 2.5)), new THREE.Vector3(ex, 5.6, ez), b.roofY]); break;
       }
-    }
+    };
+    for (const [ox, oz] of order.slice(5, 7)) tower(ox + jit(2), oz + jit(2), 22, 18, rand() < 0.4 ? 5 : 4); // two tall blocks on leftover outpost lots
+    // and two long, lower halls in the corners of the site
+    const corners = [[110, 110], [-110, 110], [110, -110], [-110, -110]].map((c) => [rand(), c]).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
+    for (const [cx, cz] of corners.slice(0, 2)) tower(cx + jit(2), cz + jit(2), 28, 18, rand() < 0.5 ? 3 : 4);
     // scattered barriers, slabs and containers all the way round
     for (let i = 0; i < 260; i++) {
       const side = Math.floor(rand() * 4), along = (rand() * 2 - 1) * (ARENA - 6), depth = CORE + 4 + rand() * (ARENA - CORE - 12);
@@ -478,6 +485,16 @@ export function createWorld(scene, renderer) {
       colliders.splice(i, 1); indexRemove(c);
       if (c.mesh) { c.mesh.removeFromParent(); c.mesh.geometry.dispose(); }
       return true;
+    },
+    // stop drawing the insides of buildings that are far from the camera (they still collide and can still be destroyed)
+    updateLOD(cam, range = 110) {
+      let hidden = 0;
+      for (const g of lod) {
+        const far = Math.hypot(g.x - cam.x, g.z - cam.z) > range;
+        if (far !== g.far) { g.far = far; for (const m of g.meshes) m.visible = !far; }
+        if (far) hidden += g.meshes.length;
+      }
+      return hidden;
     },
     removeZipline(z) {
       if (z.dead) return;

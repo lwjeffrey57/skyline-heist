@@ -108,7 +108,7 @@ ctx.relock = async () => { try { await renderer.domElement.requestPointerLock();
 // ---- loop -----------------------------------------------------------------
 const hudSpeed = document.getElementById('speed'), hudState = document.getElementById('state');
 const hudPrompt = document.getElementById('prompt'), hudFps = document.getElementById('fps');
-let last = performance.now(), fpsT = 0, fpsN = 0;
+let last = performance.now(), fpsT = 0, fpsN = 0, frameN = 0;
 
 function step(dt) {
   ctx.time += dt;
@@ -125,6 +125,7 @@ function step(dt) {
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.05); last = now;
   if (playing) step(dt); else if (!window.__test) player.update(0);
+  if (frameN++ % 20 === 0) world.updateLOD(camera.position);
   view.update(dt, player);
   view.render(dt);
 
