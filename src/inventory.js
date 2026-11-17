@@ -13,13 +13,15 @@ const ICON = {
   launcher: 'M2 9h14v6H2zM16 10h6v4h-6zM6 15h3v4H6z',
   med: 'M9 3h6v6h6v6h-6v6H9v-6H3V9h6z',
   plate: 'M12 2l8 3v7c0 5-4 8-8 10-4-2-8-5-8-10V5z',
+  bag: 'M8 3h8v3h2a2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V8a2 2 0 012-2h2zM10 5v1h4V5zM8 12h8v2H8z',
   common: 'M4 8l8-4 8 4v8l-8 4-8-4z',
   uncommon: 'M7 7h10v10H7zM9 3h2v3H9zM13 3h2v3h-2zM9 18h2v3H9zM13 18h2v3h-2zM3 9h3v2H3zM3 13h3v2H3zM18 9h3v2h-3zM18 13h3v2h-3z',
   rare: 'M6 3h12l4 6-10 12L2 9z',
   epic: 'M12 2l3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z',
 };
 const WEAPON_ICON = { pistol: 'pistol', rifle: 'rifle', smg: 'rifle', dmr: 'sniper', shotgun: 'shotgun', slug_shotgun: 'shotgun', sniper: 'sniper', launcher: 'launcher' };
-const COLOR = { common: '#c9d1d9', uncommon: '#5fd38a', rare: '#5aa9ff', epic: '#d48bff', weapon: '#ff8a3c', med: '#9be37a', plate: '#7fb4ff' };
+const COLOR = { common: '#c9d1d9', uncommon: '#5fd38a', rare: '#5aa9ff', epic: '#d48bff', weapon: '#ff8a3c', med: '#9be37a', plate: '#7fb4ff', bag: '#ffc56b' };
+export const BAGS = { 4: { name: 'Sling pack', cost: 800 }, 8: { name: 'Field ruck', cost: 2000 } }; // backpacks add this many pack slots
 const SUPPLY = { med: { name: 'Medkit', cost: 150, desc: 'Heals 60. Press H in a raid.' }, plate: { name: 'Armour plate', cost: 300, desc: '+50 armour when you deploy.' } };
 export const STASH_SLOTS = 40;
 const esc = (s) => String(s).replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
@@ -31,22 +33,25 @@ export function createInventory(ctx, api) {
 
   // ---- item helpers ---------------------------------------------------------
   const kindOf = (it) => (it.t === 'loot' ? it.tier : it.t);
-  const nameOf = (it) => (it.t === 'weapon' ? (defOf(it.id) || { name: it.id }).name : it.t === 'loot' ? it.name : SUPPLY[it.t].name);
-  const sellValue = (it) => (it.t === 'loot' ? it.value : it.t === 'weapon' ? Math.round(gunCost(it.id) * 0.5) : Math.round(SUPPLY[it.t].cost * 0.5));
+  const nameOf = (it) => (it.t === 'weapon' ? (defOf(it.id) || { name: it.id }).name : it.t === 'loot' ? it.name : it.t === 'bag' ? BAGS[it.size].name : SUPPLY[it.t].name);
+  const sellValue = (it) => (it.t === 'loot' ? it.value : it.t === 'weapon' ? Math.round(gunCost(it.id) * 0.5) : Math.round((it.t === 'bag' ? BAGS[it.size] : SUPPLY[it.t]).cost * 0.5));
   const iconOf = (it) => ICON[it.t === 'weapon' ? WEAPON_ICON[it.id] || 'rifle' : it.t === 'loot' ? it.tier : it.t];
   const describe = (it) => {
     if (it.t === 'weapon') { const d = defOf(it.id); return d ? `${d.tag} · ${d.damage}${d.pellets > 1 ? ` × ${d.pellets}` : ''} damage · ${d.rpm} rpm · ${d.mag} rounds` : 'Weapon'; }
     if (it.t === 'loot') return `${it.tier[0].toUpperCase()}${it.tier.slice(1)} valuable`;
+    if (it.t === 'bag') return `Backpack: +${it.size} pack slots while equipped`;
     return SUPPLY[it.t].desc;
   };
-  const accepts = (zone, it) => zone === 'stash' || zone === 'sell' || (zone === 'pack' ? it.t !== 'weapon' : zone === 'w' ? it.t === 'weapon' : false);
+  const accepts = (zone, it) => zone === 'stash' || zone === 'sell' || (zone === 'pack' ? it.t !== 'weapon' && it.t !== 'bag' : zone === 'w' ? it.t === 'weapon' : zone === 'bag' ? it.t === 'bag' : false);
 
   // ---- saved layout ---------------------------------------------------------
   function normalise() {
     if (!Array.isArray(stash.grid)) stash.grid = [];
     while (stash.grid.length < STASH_SLOTS) stash.grid.push(null);
     if (!Array.isArray(stash.pack)) stash.pack = [];
+    if (!Array.isArray(stash.b)) stash.b = [null];
     while (stash.pack.length < packSize()) stash.pack.push(null);
+    while (stash.pack.length > packSize()) { const it = stash.pack.pop(); if (it) addToStash(it); } // a smaller backpack: the overflow goes to the stash
     if (!Array.isArray(stash.w)) stash.w = [null, null];
     // weapons owned under the old list-based armoury become tiles
     if (stash.armory) { for (const id in stash.armory) for (let n = 0; n < stash.armory[id]; n++) addToStash({ t: 'weapon', id }); delete stash.armory; delete stash.bring; }
@@ -57,7 +62,7 @@ export function createInventory(ctx, api) {
     if (i < 0) { stash.credits += sellValue(it); return false; }
     stash.grid[i] = it; return true;
   }
-  const zoneArr = (zone) => (zone === 'stash' ? stash.grid : zone === 'pack' ? stash.pack : stash.w);
+  const zoneArr = (zone) => (zone === 'stash' ? stash.grid : zone === 'pack' ? stash.pack : zone === 'bag' ? stash.b : stash.w);
 
   // ---- DOM ------------------------------------------------------------------
   const style = document.createElement('style');
@@ -116,9 +121,9 @@ export function createInventory(ctx, api) {
 
   function render() {
     normalise();
-    const risk = stash.pack.concat(stash.w).reduce((a, it) => a + (it ? sellValue(it) : 0), 0);
+    const risk = stash.pack.concat(stash.w, stash.b).reduce((a, it) => a + (it ? sellValue(it) : 0), 0);
     const pistol = defOf('pistol');
-    const shop = GUNS.map(([id, , , cost]) => ({ it: { t: 'weapon', id }, cost })).concat(Object.keys(SUPPLY).map((k) => ({ it: { t: k }, cost: SUPPLY[k].cost })));
+    const shop = GUNS.map(([id, , , cost]) => ({ it: { t: 'weapon', id }, cost })).concat(Object.keys(SUPPLY).map((k) => ({ it: { t: k }, cost: SUPPLY[k].cost })), Object.keys(BAGS).map((k) => ({ it: { t: 'bag', size: Number(k) }, cost: BAGS[k].cost })));
     root.innerHTML = `
       <div>
         <h1>Skyline Heist</h1>
@@ -129,6 +134,7 @@ export function createInventory(ctx, api) {
           <div class="slot wide"><div class="iv-tile row fixed" style="--c:#e9e3d4"><svg viewBox="0 0 24 24"><path d="${ICON.pistol}"/></svg><span class="nm">${esc(pistol ? pistol.name : 'Pistol')} · sidearm</span></div></div>
           ${slot('w', 0, stash.w[0], 'wide', 'Drag a weapon here')}
           ${slot('w', 1, stash.w[1], 'wide', 'Drag a weapon here')}
+          ${slot('bag', 0, stash.b[0], 'wide', 'Backpack slot')}
         </div>
         <h3>Pack — ${stash.pack.filter(Boolean).length}/${packSize()} · carried worth ${risk} cr</h3>
         <div class="grid" style="grid-template-columns:repeat(4,1fr)">${stash.pack.map((it, i) => slot('pack', i, it)).join('')}</div>
@@ -213,7 +219,7 @@ export function createInventory(ctx, api) {
 
   normalise();
   return {
-    addToStash, normalise, sellValue, nameOf,
+    addToStash, normalise, sellValue, nameOf, tile,
     show() { if (root.hidden) { render(); root.hidden = false; } },
     hide() { root.hidden = true; tip.hidden = true; },
     get visible() { return !root.hidden; },

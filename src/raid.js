@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createInventory } from './inventory.js';
+import { createInventory, BAGS } from './inventory.js';
 
 // Extraction mode. Deploy, search crates and fallen guards for loot, reach an extraction zone and hold it
 // to bank what you carry. Die or run out of time and the backpack is lost. Banked credits buy upgrades.
@@ -81,6 +81,7 @@ function rollItem(luck) {
 function rollContents(kind) {
   const c = CRATES[kind], n = Math.round(rnd(c.rolls[0], c.rolls[1])), out = [];
   for (let i = 0; i < n; i++) {
+    if (Math.random() < 0.03) { const size = Math.random() < 0.25 ? 8 : 4; out.push({ supply: 'bag', size, name: BAGS[size].name }); continue; }
     const r = Math.random();
     if (r < 0.14) out.push({ supply: 'medkit', name: 'Medkit' });
     else if (r < 0.26) out.push({ supply: 'armor', name: 'Armour plate' });
@@ -96,7 +97,8 @@ export function init(ctx) {
   let tick = 0, tick10 = 0, reloading = false;
   let extraMed = 0, extraArmor = 0; // supplies bought on the loadout screen for the next raid
   let state = 'stash', timeLeft = 0, pack = [], medkits = 0, armor = 0, holdT = 0, exitT = 0, result = null, healCd = 0, target = null;
-  const packSize = () => (stash.upgrades.pack ? 12 : 8);
+  let bagBonus = 0, foundBag = 0, packOpen = false; // backpack slots this raid; a bigger backpack found in the raid
+  const packSize = () => (stash.upgrades.pack ? 12 : 8) + (state === 'raid' ? bagBonus : (stash.b && stash.b[0] ? stash.b[0].size : 0));
   const packValue = () => pack.reduce((a, i) => a + i.value, 0);
   player.noManualRespawn = true;
 
@@ -121,6 +123,14 @@ export function init(ctx) {
     #rd-toasts div { margin-top: 3px; transition: opacity .5s; }
     .rd-mark { position: fixed; transform: translate(-50%, -50%); text-align: center; font-size: 11px; letter-spacing: 1px; color: #9be37a; text-shadow: 0 1px 3px rgba(0,0,0,.8); pointer-events: none; font-variant-numeric: tabular-nums; }
     .rd-mark i { display: block; width: 12px; height: 12px; margin: 0 auto 3px; border: 2px solid #9be37a; transform: rotate(45deg); }
+    #rd-packui { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(5,7,10,.35); }
+    #rd-packui .box { width: 420px; padding: 0 26px 20px; background: rgba(8,11,15,.92); border-top: 3px solid #ffc56b; color: #fff; user-select: none; }
+    #rd-packui h2 { margin: 0 -26px 8px; padding: 14px 26px 11px; font-size: 22px; letter-spacing: 6px; text-transform: uppercase; background: rgba(255,255,255,.04); }
+    #rd-packui p { margin: 0 0 10px; font-size: 12px; letter-spacing: 1px; opacity: .8; line-height: 1.6; }
+    #rd-packui .pgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+    #rd-packui .slot { position: relative; aspect-ratio: 1; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.12); }
+    #rd-packui .pdrop { margin-top: 8px; padding: 12px; text-align: center; border: 1px dashed rgba(255,138,112,.6); color: #ff8a70; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; }
+    #rd-packui .go { margin-top: 12px; padding: 9px 12px; text-align: center; background: #ffc56b; color: #14100a; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; font-size: 12px; }
     #rd-panel { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
     #rd-panel .box { min-width: 420px; max-width: 520px; padding: 22px 26px; background: rgba(8,11,15,.86); border: 1px solid rgba(255,255,255,.14); color: #fff; }
     #rd-panel h2 { margin: 0 0 4px; font-size: 20px; letter-spacing: 3px; text-transform: uppercase; }
@@ -245,6 +255,11 @@ export function init(ctx) {
       return true;
     }
     if (item.supply === 'ammoFull') { if (ctx.weapons && ctx.weapons.addAmmo) ctx.weapons.addAmmo(1); return true; }
+    if (item.supply === 'bag') {
+      if (item.size <= bagBonus) { toast(`${esc(item.name)} — no bigger than the pack you carry`, '#c9d1d9'); return true; }
+      bagBonus = item.size; foundBag = item.size; chime([520, 780, 1040], 0.07, 0.3, 0.2);
+      toast(`+ ${esc(item.name)} <span style="opacity:.7">pack now holds ${packSize()}</span>`, '#ffc56b'); return true;
+    }
     if (item.supply === 'key') { keycards++; chime([880, 1175, 1568], 0.07, 0.3, 0.2); toast('+ Keycard <span style="opacity:.7">opens the strongroom on the plaza</span>', '#d48bff'); return true; }
     if (item.supply) chime([440], 0.05, 0.1, 0.12, 'square');
     if (item.supply === 'medkit') { if (medkits >= 4) return false; medkits++; toast('+ Medkit', '#9be37a'); return true; }
@@ -335,6 +350,7 @@ export function init(ctx) {
   function deploy() {
     detected = false; for (const c of contracts) { c.n = 0; c.done = false; }
     keycards = 0; phase = 0; lateExit = false; exitSec = 0;
+    bagBonus = stash.b && stash.b[0] ? stash.b[0].size : 0; foundBag = 0;
     state = 'raid'; timeLeft = RAID.time; pack = []; holdT = 0; exitT = 0; result = null; reveal = null; raidGuns.clear();
     // everything in the pack comes along: supplies are put to use, valuables ride in the pack (and are at risk)
     medkits = baseMed(); armor = baseArmor(); broughtMed = 0; brought.clear();
@@ -376,6 +392,7 @@ export function init(ctx) {
       result.bonus = contracts.reduce((a, c) => a + (c.done ? c.def.pay : 0), 0); stash.credits += result.bonus;
       stash.extracted++; stash.best = Math.max(stash.best, value);
       // the haul stays in your pack for you to sort; unused medkits you brought come back; found weapons go to the stash
+      if (foundBag) { const old = stash.b && stash.b[0]; stash.b = [{ t: 'bag', size: foundBag }]; if (old) menu.addToStash(old); } // the bigger backpack is now yours
       const back = items.map((i) => ({ t: 'loot', name: i.name, tier: i.tier, value: i.value }));
       for (let n = Math.min(broughtMed, Math.max(0, medkits - baseMed())); n > 0; n--) back.push({ t: 'med' });
       stash.pack = back; menu.normalise();
@@ -383,13 +400,13 @@ export function init(ctx) {
       for (const id of raidGuns) if (!brought.has(id)) menu.addToStash({ t: 'weapon', id });
       chime([520, 660, 780, 1040, 1320], 0.09, 0.45, 0.2);
     } else {
-      stash.lost++; stash.pack = []; stash.w = [null, null];
+      stash.lost++; stash.pack = []; stash.w = [null, null]; stash.b = [null];
       if (stash.upgrades.pouch && items.length) { result.saved = items[0]; menu.addToStash({ t: 'loot', name: items[0].name, tier: items[0].tier, value: items[0].value }); }
       result.guns = [...new Set([...raidGuns, ...brought])].map(nameOf);
       menu.normalise();
       chime([330, 262, 196], 0.14, 0.4, 0.16, 'sawtooth');
     }
-    raidGuns.clear(); reveal = null;
+    raidGuns.clear(); reveal = null; closePack(false);
     saveStash(stash);
     state = 'result'; pack = []; setBots(false);
     zones.forEach((zn) => { zn.group.visible = false; zn.mark.hidden = true; });
@@ -457,6 +474,39 @@ export function init(ctx) {
     const guns = result.guns.length ? `<p style="margin-top:10px;color:${result.kind === 'extracted' ? '#9be37a' : '#ff8a70'}">${result.kind === 'extracted' ? 'Weapons found — sent to your stash' : 'Weapons lost'}: ${result.guns.map(esc).join(', ')}</p>` : '';
     panel.innerHTML = `<div class="box"><h2>${t[0]}</h2><p>${t[1]}</p><table>${rows}</table>${guns}<p style="margin:12px 0 4px;letter-spacing:2px;text-transform:uppercase;font-size:10px">Contracts${result.bonus ? ` — bonus ${result.bonus} cr` : ''}</p><div style="font-size:13px;line-height:1.6">${contractRows(true)}</div><div class="go">Press Enter — a new map layout loads, then click to continue</div></div>`;
   }
+  // ---- in-raid pack screen (Tab): tiles you can rearrange or drag out to drop. The raid keeps running while it is open.
+  const pui = el('rd-packui'); pui.hidden = true;
+  let pdrag = null, pghost = null;
+  function renderPackUI() {
+    const cells = Array.from({ length: packSize() }, (_, i) => `<div class="slot" data-pi="${i}">${pack[i] ? menu.tile({ t: 'loot', ...pack[i] }) : ''}</div>`).join('');
+    const guns = ctx.weapons ? ctx.weapons.inventory.filter((v) => !v.locked).map((v) => esc(v.def.name)).join(' · ') : '';
+    pui.innerHTML = `<div class="box"><h2>Pack ${pack.length}/${packSize()}</h2><p>Worth ${packValue()} credits if you get out${bagBonus ? ` · ${esc(BAGS[bagBonus].name)} +${bagBonus}` : ''}</p>
+      <div class="pgrid">${cells}</div>
+      <div class="pdrop" data-drop="1">Drag here to drop</div>
+      <p style="margin-top:12px">Carrying: ${guns}<br>Medkits ${medkits} · Armour ${Math.round(armor)}${keycards ? ` · Keycards ${keycards}` : ''}</p>
+      <div class="go" data-close="1" style="cursor:pointer">Tab or click to close</div></div>`;
+  }
+  function openPack() { packOpen = true; ctx.uiOpen = true; renderPackUI(); pui.hidden = false; if (document.pointerLockElement) document.exitPointerLock(); }
+  function closePack(relock = true) { if (!packOpen) return; packOpen = false; ctx.uiOpen = false; pui.hidden = true; if (pghost) { pghost.remove(); pghost = null; } pdrag = null; if (relock && ctx.relock) ctx.relock(); }
+  pui.addEventListener('mousedown', (e) => {
+    const s = e.target.closest('[data-pi]'); if (!s || e.button !== 0) return;
+    const i = Number(s.dataset.pi); if (!pack[i]) return;
+    pdrag = i; pghost = document.createElement('div'); pghost.id = 'iv-ghost'; pghost.innerHTML = menu.tile({ t: 'loot', ...pack[i] }); document.body.appendChild(pghost);
+    pghost.style.left = `${e.clientX}px`; pghost.style.top = `${e.clientY}px`; e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e) => { if (pghost) { pghost.style.left = `${e.clientX}px`; pghost.style.top = `${e.clientY}px`; } });
+  window.addEventListener('mouseup', (e) => {
+    if (pdrag === null) return;
+    const at = document.elementFromPoint(e.clientX, e.clientY), slot = at && at.closest('[data-pi]'), drop = at && at.closest('[data-drop]');
+    if (drop) { // dropped items land at your feet as a pack you can search again
+      const [it] = pack.splice(pdrag, 1);
+      const L = addLootable('bag', player.pos.x + rnd(-0.5, 0.5), floorBelow(player.pos.x, player.pos.y, player.pos.z), player.pos.z + rnd(-0.5, 0.5), Math.random() * 3); L.items = [it];
+      chime([300], 0.05, 0.12, 0.12, 'square');
+    } else if (slot) { const j = Math.min(Number(slot.dataset.pi), pack.length - 1); const it = pack[pdrag]; pack[pdrag] = pack[j]; pack[j] = it; }
+    if (pghost) pghost.remove(); pghost = null; pdrag = null; renderPackUI();
+  });
+  pui.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closePack(); });
+
   function renderPack() {
     const rows = pack.slice().sort((a, b) => b.value - a.value).map((i) => `<tr><td style="color:${TIERS[i.tier].color}">${esc(i.name)}</td><td>${i.value} cr</td></tr>`).join('') || '<tr><td class="dim">Nothing yet</td><td></td></tr>';
     panel.innerHTML = `<div class="box"><h2>Pack ${pack.length}/${packSize()}</h2><p>Worth ${packValue()} credits if you get out</p><table>${rows}</table></div>`;
@@ -485,7 +535,7 @@ export function init(ctx) {
     contractsHtml: () => contractRows(false),
     onDeploy: () => { deploy(); const o = document.getElementById('overlay'); if (o) o.click(); }, // the click also captures the mouse
   });
-  ctx.raid = { menu, config: RAID, stash, get state() { return state; }, get pack() { return pack; }, get timeLeft() { return timeLeft; }, set timeLeft(t) { timeLeft = t; }, lootables, zones, deploy, endRaid, get armor() { return armor; }, get contracts() { return contracts; }, get keycards() { return keycards; }, set keycards(n) { keycards = n; }, get phase() { return phase; }, setContracts(ids) { contracts = ids.map((id) => ({ def: CONTRACTS.find((c) => c.id === id), n: 0, done: false })); }, get medkits() { return medkits; } };
+  ctx.raid = { menu, config: RAID, stash, get state() { return state; }, get pack() { return pack; }, get timeLeft() { return timeLeft; }, set timeLeft(t) { timeLeft = t; }, lootables, zones, deploy, endRaid, get armor() { return armor; }, get contracts() { return contracts; }, get keycards() { return keycards; }, get packOpen() { return packOpen; }, get bagBonus() { return bagBonus; }, packSize, set keycards(n) { keycards = n; }, get phase() { return phase; }, setContracts(ids) { contracts = ids.map((id) => ({ def: CONTRACTS.find((c) => c.id === id), n: 0, done: false })); }, get medkits() { return medkits; } };
   setBots(false); player.protectT = 1e9;
   panel.hidden = true; menu.show(); saveStash(stash);
 
@@ -597,7 +647,9 @@ export function init(ctx) {
       const shielded = player.protectT > 0; sub.hidden = !shielded;
       if (shielded) sub.textContent = `Shielded ${player.protectT.toFixed(1)}s`;
       kit.innerHTML = `${keycards ? `<span style="color:#d48bff">Keycards <b style="color:#d48bff">${keycards}</b></span> · ` : ''}Medkits <b>${medkits}</b> <span style="opacity:.6">H</span> · Armour <b>${Math.round(armor)}</b><div class="bar"><i style="width:${armor}%"></i></div>`;
-      const showPack = input.down('Tab'); if (showPack) renderPack(); panel.hidden = !showPack;
+      panel.hidden = true;
+      if (input.pressed.has('Tab')) { if (packOpen) closePack(); else openPack(); }
+      if (packOpen && pdrag === null && tick % 20 === 0) renderPackUI(); // keep it current while loot comes in
     },
   };
 }

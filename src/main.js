@@ -61,16 +61,16 @@ overlay.addEventListener('click', async () => {
 });
 document.addEventListener('pointerlockchange', () => {
   if (document.pointerLockElement === renderer.domElement) { dragLook = false; setPlaying(true); }
-  else if (!dragLook) setPlaying(false);
+  else if (!dragLook && !ctx.uiOpen) setPlaying(false); // an in-raid panel (the pack) frees the mouse without pausing
 });
 document.addEventListener('mousemove', (e) => {
-  if (!playing) return;
+  if (!playing || ctx.uiOpen) return;
   if (dragLook && !(e.buttons & 2)) return;
   const sens = 0.0022 * player.fovScale;
   player.yaw -= e.movementX * sens;
   player.pitch = THREE.MathUtils.clamp(player.pitch - e.movementY * sens, -1.5, 1.5);
 });
-document.addEventListener('mousedown', (e) => { if (!playing) return; input.keys.add('Mouse' + e.button); input.pressed.add('Mouse' + e.button); });
+document.addEventListener('mousedown', (e) => { if (!playing || ctx.uiOpen) return; input.keys.add('Mouse' + e.button); input.pressed.add('Mouse' + e.button); });
 document.addEventListener('mouseup', (e) => input.keys.delete('Mouse' + e.button));
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 window.addEventListener('wheel', (e) => { if (playing) input.pressed.add(e.deltaY > 0 ? 'WheelDown' : 'WheelUp'); }, { passive: true });
@@ -97,6 +97,8 @@ function toggleMute() {
   muteTag.hidden = !allMuted;
   try { localStorage.setItem('sh-muted', allMuted ? '1' : '0'); } catch { /* storage unavailable */ }
 }
+
+ctx.relock = async () => { try { await renderer.domElement.requestPointerLock(); } catch { dragLook = true; } };
 
 // ---- loop -----------------------------------------------------------------
 const hudSpeed = document.getElementById('speed'), hudState = document.getElementById('state');
