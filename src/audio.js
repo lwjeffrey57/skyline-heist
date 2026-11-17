@@ -450,7 +450,7 @@ export function init(ctx) {
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
     if (e.code === 'F4') { e.preventDefault(); const o = ['R', 'A', 'B', 'C']; setGunProfile(o[(o.indexOf(profile) + 1) % 4]); say('GUN SOUND  ' + NAMES[profile]); }
-    else if (e.code === 'KeyM') { musicOn = !musicOn; applyMusic(); try { localStorage.setItem('au-music-v2', musicOn ? '1' : '0'); } catch (err) { /* ignore */ } say(musicOn ? 'MUSIC ON' : 'MUSIC OFF'); }
+    else if (e.code === 'F6') { musicOn = !musicOn; applyMusic(); try { localStorage.setItem('au-music-v2', musicOn ? '1' : '0'); } catch (err) { /* ignore */ } say(musicOn ? 'MUSIC ON' : 'MUSIC OFF'); }
   });
   const applyVol = () => { if (G) G.master.gain.setTargetAtTime(muted ? 0 : volume, ac.currentTime, 0.02); };
   ctx.audio = {

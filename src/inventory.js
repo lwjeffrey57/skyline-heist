@@ -155,7 +155,7 @@ export function createInventory(ctx, api) {
         ${UPGRADES.map((u) => `<div class="up ${stash.upgrades[u.id] ? 'own' : ''}" data-up="${u.id}"><span>${esc(u.name)}<br><span style="opacity:.6;font-size:10px">${esc(u.desc)}</span></span><b>${stash.upgrades[u.id] ? 'Owned' : `${u.cost} cr`}</b></div>`).join('')}
       </div>
       <div style="grid-column:3"><h3 style="margin-top:0">Settings</h3><div id="iv-settings"></div></div>
-      <div class="help">Drag tiles between the stash, your pack and the weapon slots. What you carry is lost if you die. In a raid: F search · H medkit · Tab pack · N mute.</div>`;
+      <div class="help">Drag tiles between the stash, your pack and the weapon slots. What you carry is lost if you die. In a raid: F search · H medkit · Tab pack · M map · Esc pause and settings · N mute.</div>`;
     root._shop = shop;
     if (ctx.mountSettings) ctx.mountSettings(root.querySelector('#iv-settings'));
   }
