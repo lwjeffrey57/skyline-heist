@@ -645,12 +645,7 @@ export function init(ctx) {
       if (exitT >= RAID.extractHold) { endRaid('extracted'); return; }
 
       if (inZone) everInZone = true;
-      if (!stash.tutorialDone) {
-        const text = hintStep === 0 ? 'Crates have a glowing band. Walk up to one and hold <b>F</b> to search it.'
-          : !everInZone ? 'Follow a green <b>EXIT</b> on the compass at the top. <b>Tab</b> opens your pack, <b>H</b> uses a medkit.'
-            : 'Stay inside the green zone until the bar fills to get out with your loot.';
-        hint.innerHTML = text; hint.hidden = false;
-      } else hint.hidden = true;
+      hint.hidden = true; // the first-raid hint banner was removed: the controls are listed on the pause and inventory screens
       const showBar = inZone || holdT > 0 || !!reveal || doorT > 0;
       hold.hidden = !showBar;
       if (showBar) {
