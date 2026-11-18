@@ -6,7 +6,7 @@ import * as THREE from 'three';
 export const StyleShader = {
   uniforms: {
     tDiffuse: { value: null }, tDepth: { value: null }, px: { value: new THREE.Vector2(1 / 1280, 1 / 720) },
-    near: { value: 0.1 }, far: { value: 1000 }, bands: { value: 5 }, sat: { value: 1.45 }, ink: { value: new THREE.Color(0.035, 0.04, 0.07) }, line: { value: 1.25 },
+    near: { value: 0.1 }, far: { value: 1000 }, bands: { value: 5 }, sat: { value: 1.05 }, ink: { value: new THREE.Color(0.035, 0.04, 0.07) }, line: { value: 1.25 },
   },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
   fragmentShader: `
