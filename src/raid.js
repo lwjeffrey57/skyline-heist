@@ -179,6 +179,7 @@ export function init(ctx) {
   let doorT = 0, hintStep = 0, everInZone = false; // first-raid hints
   events.on('lootTaken', () => { if (hintStep === 0) hintStep = 1; });
   let keycards = 0, phase = 0, lateExit = false, exitSec = 0; // keycards open vault cases; the raid escalates in phases
+  let exitCallT = -99;
   let reveal = null; // the container being emptied, one item at a time
   const brought = new Set(); let broughtMed = 0, menu = null; // weapons and medkits taken in from the loadout
   const raidGuns = new Set(); // weapons carried this raid (brought or found): kept on extraction, lost otherwise
@@ -308,12 +309,13 @@ export function init(ctx) {
   // opening a container starts a reveal: items come out one at a time (see update), best saved for last
   function search(L) {
     if (L.kind === 'terminal') { // signal station: see every guard on the map for a minute, and push the reinforcements back
-      L.opened = true; L.strip.material = mats(L.kind).dead; revealT = 60; phaseDelay += 60; bump(stash, 'terminal');
-      toast('Signal tapped — guards are marked on your map (M) for 60 s and reinforcements are delayed', '#35e0d8'); chime([660, 990, 1320], 0.08, 0.3, 0.2);
+      L.opened = true; L.strip.material = mats(L.kind).dead; revealT = 60; if (ctx.heat) ctx.heat.add(-12); bump(stash, 'terminal');
+      toast('Signal tapped — guards are marked on your map (M) for 60 s and the alarm log is scrubbed: heat drops', '#35e0d8'); chime([660, 990, 1320], 0.08, 0.3, 0.2);
       return;
     }
     L.busy = true; chime([300, 380], 0.05, 0.12, 0.12, 'square');
     const order = { common: 0, uncommon: 1, rare: 2, epic: 3 };
+    if (ctx.heat && ctx.heat.lootLuck > 0) L.items = L.items.map((it) => (it.tier === 'common' && Math.random() < ctx.heat.lootLuck ? rollItem(4) : it));
     const queue = L.items.slice().sort((p, q) => (p.tier ? order[p.tier] + 1 : 0) - (q.tier ? order[q.tier] + 1 : 0));
     reveal = { L, queue, left: [], t: 0.25, total: queue.length };
     L.items = [];
@@ -322,6 +324,7 @@ export function init(ctx) {
     const { L, left } = reveal; reveal = null; L.busy = false; L.items = left;
     if (left.length) toast('Pack full — left the cheaper items behind', '#ff8a70');
     else { L.opened = true; L.strip.material = mats(L.kind).dead; if (L.lid) { L.lid.rotation.z = 0.9; L.lid.position.set(-0.36, 0.72, 0); } if (L.kind === 'bag') L.group.visible = false; }
+    if (ctx.heat) ctx.heat.add(L.kind === 'vault' ? 5 : L.kind === 'bag' ? 0.3 : 1.2);
     events.emit('lootTaken', { kind: L.kind, district: L.district });
   }
 
@@ -439,11 +442,12 @@ export function init(ctx) {
     const value = packValue();
     const nameOf = (id) => { const s = ctx.weapons && ctx.weapons.inventory.find((v) => v.def.id === id); return s ? s.def.name : id; };
     const items = pack.slice().sort((a, b) => b.value - a.value), guns = [...raidGuns].filter((id) => !brought.has(id)).map(nameOf);
-    result = { kind, value, items, guns, saved: null, bonus: 0, at: ctx.time, shown: 0 };
+    result = { kind, value, items, guns, saved: null, bonus: 0, hazard: 0, heat: ctx.heat ? ctx.heat.tier : 1, heatName: ctx.heat ? ctx.heat.name : '', at: ctx.time, shown: 0 };
     for (const c of contracts) c.done = kind === 'extracted' && met(c);
     stash.inRaid = false;
     if (kind === 'extracted') {
       result.bonus = contracts.reduce((a, c) => a + (c.done ? c.def.pay : 0), 0); stash.credits += result.bonus;
+      result.hazard = Math.round(value * (ctx.heat ? ctx.heat.bonus : 0)); stash.credits += result.hazard;
       stash.extracted++; stash.best = Math.max(stash.best, value);
       const took = RAID.time - timeLeft; stash.fastest = stash.fastest ? Math.min(stash.fastest, took) : took;
       stash.streak = (stash.streak || 0) + 1; stash.bestStreak = Math.max(stash.bestStreak || 0, stash.streak); stash.tutorialDone = true;
@@ -536,7 +540,7 @@ export function init(ctx) {
     const t = { extracted: ['Extracted', `Haul worth <b style="color:#ffc56b;font-size:16px">${tally}</b> credits is in your pack — store or sell it in the stash`], kia: ['Killed in action', `Lost a pack worth ${result.value} credits`], mia: ['Missing in action', `Time ran out — lost a pack worth ${result.value} credits`] }[result.kind];
     const rows = result.items.slice(0, shown).map((i) => `<tr><td style="color:${TIERS[i.tier].color}">${esc(i.name)}${result.saved === i ? ' <span style="color:#9be37a">— saved by the secure pouch, sent to your stash</span>' : ''}</td><td>${i.value} cr</td></tr>`).join('') || '<tr><td class="dim">Empty pack</td><td></td></tr>';
     const guns = result.guns.length ? `<p style="margin-top:10px;color:${result.kind === 'extracted' ? '#9be37a' : '#ff8a70'}">${result.kind === 'extracted' ? 'Weapons found — sent to your stash' : 'Weapons lost'}: ${result.guns.map(esc).join(', ')}</p>` : '';
-    panel.innerHTML = `<div class="box"><h2>${t[0]}</h2><p>${t[1]}</p><table>${rows}</table>${guns}<p style="margin:12px 0 4px;letter-spacing:2px;text-transform:uppercase;font-size:10px">Contracts${result.bonus ? ` — bonus ${result.bonus} cr` : ''}</p><div style="font-size:13px;line-height:1.6">${contractRows(true)}</div><div class="go">Press Enter — a new map layout loads, then click to continue</div></div>`;
+    panel.innerHTML = `<div class="box"><h2>${t[0]}</h2><p>${t[1]}</p><table>${rows}</table>${result.hazard ? `<p style="color:#ff9a3c">Hazard pay — left at heat ${result.heat} (${result.heatName}): <b>+${result.hazard} cr</b> paid to your account</p>` : ''}${guns}<p style="margin:12px 0 4px;letter-spacing:2px;text-transform:uppercase;font-size:10px">Contracts${result.bonus ? ` — bonus ${result.bonus} cr` : ''}</p><div style="font-size:13px;line-height:1.6">${contractRows(true)}</div><div class="go">Press Enter — a new map layout loads, then click to continue</div></div>`;
   }
   // ---- in-raid pack screen (Tab): tiles you can rearrange or drag out to drop. The raid keeps running while it is open.
   const pui = el('rd-packui'); pui.hidden = true;
@@ -599,7 +603,7 @@ export function init(ctx) {
     contractsHtml: () => contractRows(false),
     onDeploy: () => { deploy(); const o = document.getElementById('overlay'); if (o) o.click(); }, // the click also captures the mouse
   });
-  ctx.raid = { menu, config: RAID, stash, get state() { return state; }, get pack() { return pack; }, get timeLeft() { return timeLeft; }, set timeLeft(t) { timeLeft = t; }, lootables, zones, deploy, endRaid, get armor() { return armor; }, get contracts() { return contracts; }, get keycards() { return keycards; }, get revealT() { return revealT; }, get packOpen() { return packOpen; }, get bagBonus() { return bagBonus; }, packSize, set keycards(n) { keycards = n; }, get phase() { return phase; }, setContracts(ids) { contracts = ids.map((id) => ({ def: CONTRACTS.find((c) => c.id === id), n: 0, done: false })); }, get medkits() { return medkits; } };
+  ctx.raid = { toast, chime, get heat() { return ctx.heat ? ctx.heat.frac : 0; }, get heatTier() { return ctx.heat ? ctx.heat.tier : 1; }, menu, config: RAID, stash, get state() { return state; }, get pack() { return pack; }, get timeLeft() { return timeLeft; }, set timeLeft(t) { timeLeft = t; }, lootables, zones, deploy, endRaid, get armor() { return armor; }, get contracts() { return contracts; }, get keycards() { return keycards; }, get revealT() { return revealT; }, get packOpen() { return packOpen; }, get bagBonus() { return bagBonus; }, packSize, set keycards(n) { keycards = n; }, get phase() { const t = ctx.heat ? ctx.heat.tier : 1; return t >= 4 ? 2 : t >= 2 ? 1 : 0; }, setContracts(ids) { contracts = ids.map((id) => ({ def: CONTRACTS.find((c) => c.id === id), n: 0, done: false })); }, get medkits() { return medkits; } };
   setBots(false); player.protectT = 1e9;
   panel.hidden = true; menu.show(); saveStash(stash);
 
@@ -666,7 +670,7 @@ export function init(ctx) {
           if (doorT >= 1.5) {
             sr.open = true; keycards--; doorT = 0; world.removeCollider(sr.door); bump(stash, 'strongroom');
             toast('Strongroom open — the alarm is calling guards in', '#d48bff'); chime([330, 440, 330, 440], 0.16, 0.3, 0.22, 'sawtooth');
-            if (ctx.bots && phase === 0) { phase = 1; ctx.bots.config.respawnDelay = 16; ctx.bots.setCount(RAID.bots + 1); }
+            if (ctx.heat) ctx.heat.add(16);
           }
         } else doorT = 0;
         if (!player.prompt) player.prompt = keycards > 0 ? 'Hold <b>F</b> — use keycard on the strongroom door' : 'Strongroom sealed — needs a <b>keycard</b>';
@@ -687,9 +691,10 @@ export function init(ctx) {
       }
       if (zoneNow && zoneNow.type === 'beacon' && !zoneNow.alarmed) {
         zoneNow.alarmed = true; toast('Beacon lit — hold this zone for 20 seconds. Guards are on their way.', '#ffc56b'); chime([330, 440, 330, 440], 0.16, 0.3, 0.22, 'sawtooth');
-        if (ctx.bots) { phase = Math.max(phase, 1); ctx.bots.config.respawnDelay = 12; ctx.bots.setCount(RAID.bots + 2); }
+        if (ctx.heat) { ctx.heat.add(14); ctx.heat.hunt(3); }
       }
-      const inZone = !!zoneNow; holdNeed = zoneNow && zoneNow.type === 'beacon' ? 20 : RAID.extractHold;
+      const inZone = !!zoneNow;
+      if (inZone && exitT === 0 && ctx.heat && ctx.heat.tier >= 3 && ctx.time - exitCallT > 30) { exitCallT = ctx.time; ctx.heat.hunt(ctx.heat.tier - 1); toast('Guards are converging on the exit', '#ff8a70'); } holdNeed = zoneNow && zoneNow.type === 'beacon' ? 20 : RAID.extractHold;
       exitT = inZone ? exitT + dt : 0;
       // the extraction countdown is audible, rising as it nears the end
       if (inZone && Math.floor(exitT) >= exitSec) { chime([440 + Math.min(exitSec, 9) * 90], 0.05, 0.14, 0.16, 'square'); exitSec++; } else if (!inZone) exitSec = 0;
@@ -703,8 +708,6 @@ export function init(ctx) {
         }
         kindsDue = null;
       }
-      if (ctx.bots && phase === 0 && elapsed > 270 + phaseDelay) { phase = 1; ctx.bots.config.respawnDelay = 16; ctx.bots.setCount(RAID.bots + 1); toast('Reinforcements inbound', '#ff8a70'); chime([220, 196], 0.18, 0.4, 0.18, 'sawtooth'); }
-      if (ctx.bots && phase === 1 && elapsed > 480 + phaseDelay) { phase = 2; ctx.bots.config.respawnDelay = 9; ctx.bots.setCount(RAID.bots + 2); toast('Lockdown — the site is filling with guards', '#ff5a4a'); chime([220, 196, 165], 0.18, 0.5, 0.2, 'sawtooth'); }
       // with three minutes left an emergency exit opens at the spare zone nearest to you
       if (!lateExit && timeLeft < 180) {
         lateExit = true;
