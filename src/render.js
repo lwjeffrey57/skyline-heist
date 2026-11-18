@@ -8,6 +8,7 @@ import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { patchShaderChunks, createSunRig } from './visuals/lighting.js';
 import { createSky, SKY, getNoiseTexture } from './visuals/sky.js';
 import { ScenePost, TAAPass, FinishPass } from './visuals/post.js';
+import { StyleShader } from './visuals/style.js';
 
 // Renderer, sky, lighting and post-processing. Returns the `view` object used by main.js:
 //   { renderer, scene, camera, sun, sunDir, composer, update(dt, player), render(dt), resize(), setPostEnabled(b), postEnabled }
@@ -79,6 +80,12 @@ export function createView() {
   composer.addPass(bloom);
   const finish = new FinishPass(); finish.depthSource = () => scenePost.sceneDepth; finish.camera = camera;
   composer.addPass(finish);
+  // art style: 'ink' (comic outlines and flat light) or 'real'. F8 switches; the choice is remembered
+  const style = new ShaderPass(StyleShader); style.uniforms.tDepth.value = sceneRT.depthTexture;
+  let styleName = new URLSearchParams(location.search).get('style');
+  try { styleName = styleName || localStorage.getItem('sh-style') || 'ink'; } catch { styleName = styleName || 'ink'; }
+  style.enabled = styleName === 'ink';
+  composer.addPass(style);
   const smaa = new SMAAPass(window.innerWidth, window.innerHeight);
   composer.addPass(smaa);
   const fxaa = new ShaderPass(FXAAShader); fxaa.enabled = false;
@@ -151,10 +158,18 @@ export function createView() {
       renderer.setPixelRatio(pr); renderer.setSize(w, h);
       composer.setPixelRatio(pr); composer.setSize(w, h);
       fxaa.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
+      style.uniforms.px.value.set(1 / (w * pr), 1 / (h * pr)); style.uniforms.near.value = camera.near; style.uniforms.far.value = camera.far;
     },
   };
   window.addEventListener('resize', view.resize);
   window.addEventListener('keydown', (e) => { if (e.code === 'F2' && !e.repeat) { e.preventDefault(); view.cycleQuality(); } });
+  window.addEventListener('keydown', (e) => {
+    if (e.code !== 'F8' || e.repeat) return;
+    e.preventDefault(); style.enabled = !style.enabled;
+    try { localStorage.setItem('sh-style', style.enabled ? 'ink' : 'real'); } catch { /* storage unavailable */ }
+    hud.textContent = `art style: ${style.enabled ? 'ink' : 'realistic'}`; hud.style.opacity = 0.85; clearTimeout(hudTimer); hudTimer = setTimeout(() => { hud.style.opacity = 0; }, 1400);
+  });
+  view.style = style;
   const want = new URLSearchParams(location.search).get('q');
   view.setQuality(QUALITY[want] ? want : 'high');
   return view;
