@@ -6,7 +6,7 @@ import * as THREE from 'three';
 export const StyleShader = {
   uniforms: {
     tDiffuse: { value: null }, tDepth: { value: null }, px: { value: new THREE.Vector2(1 / 1280, 1 / 720) },
-    near: { value: 0.1 }, far: { value: 1000 }, bands: { value: 5 }, sat: { value: 1.05 }, ink: { value: new THREE.Color(0.035, 0.04, 0.07) }, line: { value: 1.25 },
+    near: { value: 0.1 }, far: { value: 1000 }, bands: { value: 5 }, sat: { value: 0.7 }, ink: { value: new THREE.Color(0.035, 0.04, 0.07) }, line: { value: 1.25 },
   },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
   fragmentShader: `
@@ -27,11 +27,11 @@ export const StyleShader = {
       float l = max(lum(c), 1e-4), q = sqrt(lb0) * bands, f = fract(q);
       float lq = (floor(q) + smoothstep(0.4, 0.6, f)) / bands; lq *= lq;
       float sky = smoothstep(far * 0.5, far * 0.9, d0);
-      c = mix(c * (lq / max(lb0, 1e-4)), c, max(sky, 0.12));
+      c = mix(c * (lq / max(lb0, 1e-4)), c, max(sky, 0.5));
       // richer colour; shadows become deep blue-violet instead of black
       c = mix(vec3(lum(c)), c, sat);
       c = max(c, vec3(0.0));
       c = mix(vec3(0.055, 0.06, 0.11), c + vec3(0.02, 0.022, 0.04), smoothstep(0.0, 0.16, lum(c)) * 0.75 + 0.25);
-      gl_FragColor = vec4(mix(c, ink, edge * 0.92), 1.0);
+      gl_FragColor = vec4(mix(c, ink, edge * 0.75), 1.0);
     }`,
 };
