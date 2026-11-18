@@ -1,5 +1,4 @@
-// Heat: how hot the compound is. A raid starts quiet; time, noise, kills, being seen and taking valuable things all
-// raise the heat, and each tier brings more guards, faster reinforcements, bolder guards and hunting parties — and
+// Heat: how hot the compound is. A raid starts quiet; every enemy you kill raises the heat, and each tier brings more guards, faster reinforcements, bolder guards and hunting parties — and
 // richer containers and hazard pay on everything you carry out. The tier never drops during a raid.
 // ctx.heat = { value (0..100), tier (1..5), frac (0..1), bonus (hazard pay, 0..0.6), lootLuck, add(n), name }
 // Emits `heatTier { tier, name }` when the tier rises.
@@ -11,7 +10,8 @@ const TIERS = [
   { at: 62, name: 'Lockdown', color: '#ff5a4a', bots: 3, respawn: 11, aggr: 0.75, bonus: 0.4, note: 'The site is filling with guards' },
   { at: 84, name: 'Kill order', color: '#ff2d55', bots: 4, respawn: 9, aggr: 1, bonus: 0.6, note: 'Everything on site is coming for you' },
 ];
-const GAIN = { second: 0.055, shot: 0.35, quietShot: 0.05, kill: 2, machineKill: 3, alert: 1.5, blast: 2 };
+// Heat comes from kills only: each enemy you kill adds KILL, so the tiers arrive at 4, 8, 13 and 17 kills.
+const KILL = 5;
 
 export function init(ctx) {
   const { player, events } = ctx;
@@ -61,10 +61,7 @@ export function init(ctx) {
 
   events.on('raidStart', () => { active = true; value = 0; tier = 1; huntT = 0; alertCd = 0; shown = -1; apply(); });
   events.on('raidEnd', () => { active = false; bar.hidden = true; banner.style.opacity = '0'; });
-  events.on('shot', (e) => { if (e.by === player) add(e.suppressed ? GAIN.quietShot : GAIN.shot); });
-  events.on('botDied', (e) => { if (e.by === player) add(e.bot && (e.bot.kind === 'drone' || e.bot.kind === 'turret') ? GAIN.machineKill : GAIN.kill); });
-  events.on('guardAlert', () => { if (alertCd <= 0) { add(GAIN.alert); alertCd = 3; } });
-  events.on('explosion', (e) => { if (e.by === player) add(GAIN.blast); });
+  events.on('botDied', (e) => { if (e.by === player) add(KILL); });
 
   ctx.heat = {
     add, hunt, tiers: TIERS,
@@ -76,7 +73,6 @@ export function init(ctx) {
   return {
     update(dt) {
       if (!active || !ctx.raid || ctx.raid.state !== 'raid') { bar.hidden = true; return; }
-      add(GAIN.second * dt); alertCd -= dt;
       // hunting parties: from Alarm upward, guards are sent to where you are every so often
       if (tier >= 3) { huntT -= dt; if (huntT <= 0) { hunt(tier - 2); huntT = 75 - tier * 10; } }
       if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) banner.style.opacity = '0'; }

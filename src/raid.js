@@ -309,7 +309,7 @@ export function init(ctx) {
   // opening a container starts a reveal: items come out one at a time (see update), best saved for last
   function search(L) {
     if (L.kind === 'terminal') { // signal station: see every guard on the map for a minute, and push the reinforcements back
-      L.opened = true; L.strip.material = mats(L.kind).dead; revealT = 60; if (ctx.heat) ctx.heat.add(-12); bump(stash, 'terminal');
+      L.opened = true; L.strip.material = mats(L.kind).dead; revealT = 60; if (ctx.heat) ctx.heat.add(-10); bump(stash, 'terminal');
       toast('Signal tapped — guards are marked on your map (M) for 60 s and the alarm log is scrubbed: heat drops', '#35e0d8'); chime([660, 990, 1320], 0.08, 0.3, 0.2);
       return;
     }
@@ -324,7 +324,6 @@ export function init(ctx) {
     const { L, left } = reveal; reveal = null; L.busy = false; L.items = left;
     if (left.length) toast('Pack full — left the cheaper items behind', '#ff8a70');
     else { L.opened = true; L.strip.material = mats(L.kind).dead; if (L.lid) { L.lid.rotation.z = 0.9; L.lid.position.set(-0.36, 0.72, 0); } if (L.kind === 'bag') L.group.visible = false; }
-    if (ctx.heat) ctx.heat.add(L.kind === 'vault' ? 5 : L.kind === 'bag' ? 0.3 : 1.2);
     events.emit('lootTaken', { kind: L.kind, district: L.district });
   }
 
@@ -680,8 +679,8 @@ export function init(ctx) {
           doorT += dt;
           if (doorT >= 1.5) {
             sr.open = true; keycards--; doorT = 0; world.removeCollider(sr.door); bump(stash, 'strongroom');
-            toast('Strongroom open — the alarm is calling guards in', '#d48bff'); chime([330, 440, 330, 440], 0.16, 0.3, 0.22, 'sawtooth');
-            if (ctx.heat) ctx.heat.add(16);
+            toast('Strongroom open', '#d48bff'); chime([330, 440, 330, 440], 0.16, 0.3, 0.22, 'sawtooth');
+            
           }
         } else doorT = 0;
         if (!player.prompt) player.prompt = keycards > 0 ? 'Hold <b>F</b> — use keycard on the strongroom door' : 'Strongroom sealed — needs a <b>keycard</b>';
@@ -702,7 +701,7 @@ export function init(ctx) {
       }
       if (zoneNow && zoneNow.type === 'beacon' && !zoneNow.alarmed) {
         zoneNow.alarmed = true; toast('Beacon lit — hold this zone for 20 seconds. Guards are on their way.', '#ffc56b'); chime([330, 440, 330, 440], 0.16, 0.3, 0.22, 'sawtooth');
-        if (ctx.heat) { ctx.heat.add(14); ctx.heat.hunt(3); }
+        if (ctx.heat) ctx.heat.hunt(3);
       }
       const inZone = !!zoneNow;
       if (inZone && exitT === 0 && ctx.heat && ctx.heat.tier >= 3 && ctx.time - exitCallT > 30) { exitCallT = ctx.time; ctx.heat.hunt(ctx.heat.tier - 1); toast('Guards are converging on the exit', '#ff8a70'); } holdNeed = zoneNow && zoneNow.type === 'beacon' ? 20 : RAID.extractHold;

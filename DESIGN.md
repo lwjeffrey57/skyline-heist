@@ -10,8 +10,8 @@ pistol, loot it, fight its guards, and get out through an exit with what you car
 1. **The gunplay must feel amazing.** Shooting an enemy has to be a pleasure in itself: enemies visibly and audibly
    react to every hit, deaths respond to the shot that caused them, guns sound and kick with weight. If a change
    does not make fights feel better, it is probably not the next thing to do.
-2. **Raids escalate.** A raid starts quiet and tense and ends loud and desperate. The longer you stay and the more
-   you take, the hotter the compound gets (`ctx.raid.heat`, 0..1, and `ctx.raid.heatTier`, 1..5): more and tougher
+2. **Raids escalate.** A raid starts quiet and tense and ends loud and desperate. The more enemies
+   you kill, the hotter the compound gets (`ctx.raid.heat`, 0..1, and `ctx.raid.heatTier`, 1..5): more and tougher
    opposition, faster reinforcements, guards that hunt you — and richer loot and a bigger payout if you get out.
    The stakes must feel more real the deeper into a raid you are.
 3. **Contracts give each raid a purpose.** Two optional objectives per raid that pull you toward specific places

@@ -59,7 +59,6 @@ export function init(ctx) {
       d.loot = raid.addLootable('secure', d.x, 0, d.z, Math.random() * 3, items);
     }
     if (ctx.bots && ctx.bots.hunt) ctx.bots.hunt(new THREE.Vector3(d.x, 0, d.z), 3); // guards go to see what landed
-    if (ctx.heat) ctx.heat.add(3);
     say('Supply drop is down', '#ff9a3c');
     events.emit('supplyDropLanded', { x: d.x, z: d.z });
   }
@@ -88,7 +87,6 @@ export function init(ctx) {
     const mine = e.by === player;
     clearHvt(); // raid.js fills the commander's dropped pack (it sees bot.hvtDrop)
     say(mine ? 'Site commander down — their pack has the keycard' : 'Someone else got to the site commander. Their pack is still where they fell.', '#d48bff');
-    if (mine && ctx.heat) ctx.heat.add(6);
   });
 
   events.on('raidersEntered', () => { if (active) { say('Another crew has entered the site', '#e0a83a'); chime([330, 277], 0.16, 0.3, 0.16, 'triangle'); } });

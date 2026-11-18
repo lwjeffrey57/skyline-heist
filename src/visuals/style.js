@@ -19,17 +19,18 @@ export const StyleShader = {
       vec3 c = texture2D(tDiffuse, vUv).rgb;
       float d0 = lin(vUv);
       // line weight: about 2.4 px on things within a few metres, 1 px far away
-      vec2 o = px * line * mix(2.4, 1.0, smoothstep(2.0, 30.0, d0));
+      vec2 o = px * line * mix(2.0, 1.0, smoothstep(1.5, 14.0, d0));
       float dl = lin(vUv - vec2(o.x, 0.0)), dr = lin(vUv + vec2(o.x, 0.0)), du = lin(vUv + vec2(0.0, o.y)), dd = lin(vUv - vec2(0.0, o.y));
       // second difference of depth: zero across a flat surface at any angle, large at silhouettes, smaller at creases
       float e = (abs(dl + dr - 2.0 * d0) + abs(du + dd - 2.0 * d0)) / d0;
-      float outline = smoothstep(0.01, 0.035, e);
+      float outline = smoothstep(0.012, 0.04, e);
       // detail lines: brightness jumps (painted markings, panel seams, hard shadow edges), ignored in the sky and at range
       float l0 = dot(c, vec3(0.299, 0.587, 0.114));
       float gx = lum(vUv + vec2(o.x, 0.0)) - lum(vUv - vec2(o.x, 0.0)), gy = lum(vUv + vec2(0.0, o.y)) - lum(vUv - vec2(0.0, o.y));
       float g = sqrt(gx * gx + gy * gy) / (l0 + 0.18);
-      float inner = smoothstep(0.55, 1.1, g) * detail * (1.0 - smoothstep(35.0, 80.0, d0));
-      float fade = 1.0 - smoothstep(110.0, 260.0, d0);
+      float inner = smoothstep(0.55, 1.1, g) * detail * (1.0 - smoothstep(10.0, 28.0, d0));
+      // ink is strong up close and thins out with distance, so far things stay clean and readable
+      float fade = mix(1.0, 0.3, smoothstep(18.0, 60.0, d0)) * (1.0 - smoothstep(90.0, 170.0, d0));
       float k = clamp(max(outline, inner) * fade, 0.0, 1.0);
       c = mix(vec3(l0), c, sat);
       gl_FragColor = vec4(mix(max(c, vec3(0.0)), ink, k * 0.95), 1.0);
