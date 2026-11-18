@@ -68,7 +68,7 @@ export function init(ctx) {
   ticks.style.backgroundSize = `${tickEvery}px 100%`;
   const mk = (cls, text) => { const s = document.createElement('span'); s.className = cls; s.textContent = text; compass.appendChild(s); return s; };
   const cards = [['N', 0, -1], ['E', 1, 0], ['S', 0, 1], ['W', -1, 0]].map(([t, x, z]) => ({ el: mk('', t), x, z }));
-  const exits = Array.from({ length: 5 }, () => mk('exit', ''));
+  const exits = Array.from({ length: 8 }, () => mk('exit', ''));
 
   window.addEventListener('keydown', (e) => { if (e.code === 'F3') { e.preventDefault(); document.getElementById('fps').classList.toggle('on'); } });
 
@@ -88,12 +88,12 @@ export function init(ctx) {
       const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
       ticks.style.backgroundPositionX = `${W / 2 + player.yaw * pxPerRad}px`;
       for (const c of cards) place(c.el, rel(c.x, c.z, sin, cos), false);
-      const zones = ctx.raid ? ctx.raid.zones.filter((z) => z.active) : [];
+      const zones = (ctx.raid ? ctx.raid.zones.filter((z) => z.active) : []).concat(ctx.worldEvents ? ctx.worldEvents.marks : []);
       exits.forEach((el, i) => {
         const z = zones[i]; if (!z) { el.hidden = true; return; }
         const dx = z.x - player.pos.x, dz = z.z - player.pos.z;
         el.textContent = `${z.title || 'EXIT'} ${Math.round(Math.hypot(dx, dz))}m`; el.style.color = z.css || ''; el.style.setProperty('--ex', z.css || '#9be37a');
-        el.style.top = i ? '22px' : '10px'; // each exit on its own row so the labels can never collide
+        el.style.top = `${10 + (i % 3) * 12}px`; // each exit on its own row so the labels can never collide
         place(el, rel(dx, dz, sin, cos), true, i);
       });
     },

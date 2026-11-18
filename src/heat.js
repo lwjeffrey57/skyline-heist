@@ -19,7 +19,7 @@ export function init(ctx) {
 
   const style = document.createElement('style');
   style.textContent = `
-    #ht { position: fixed; top: 74px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: #fff; pointer-events: none; text-shadow: 0 1px 2px #000; }
+    #ht { position: fixed; top: 124px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: #fff; pointer-events: none; text-shadow: 0 1px 2px #000; }
     #ht .segs { display: flex; gap: 3px; }
     #ht .segs i { width: 26px; height: 5px; background: rgba(255,255,255,.16); position: relative; overflow: hidden; }
     #ht .segs i b { position: absolute; left: 0; top: 0; bottom: 0; }

@@ -483,8 +483,11 @@ export function init(ctx) {
     }
     // tougher enemy types carry better loot
     const rich = e.bot && (e.bot.kind === 'heavy' || e.bot.kind === 'marksman');
+    const commander = e.bot && e.bot.hvt, raider = e.bot && e.bot.kind === 'raider';
     const L = addLootable('bag', e.point.x + rnd(-0.4, 0.4), floorBelow(e.point.x, e.point.y, e.point.z), e.point.z + rnd(-0.4, 0.4), Math.random() * 3);
-    if (rich) { L.items = rollContents('secure'); if (Math.random() < 0.35) L.items.push({ supply: 'key', name: 'Keycard' }); }
+    if (commander) { L.items = rollContents('vault'); L.items.push({ supply: 'key', name: 'Keycard' }); L.born = ctx.time + 400; }
+    else if (raider) { L.items = rollContents('secure'); L.items.push(Math.random() < 0.5 ? { supply: 'medkit', name: 'Medkit' } : { supply: 'armor', name: 'Armour plate' }, { supply: 'ammo', name: 'Ammo box' }); L.born = ctx.time + 200; }
+    else if (rich) { L.items = rollContents('secure'); if (Math.random() < 0.35) L.items.push({ supply: 'key', name: 'Keycard' }); }
   });
   events.on('shot', (e) => { if (e.by === player && state === 'raid') player.protectT = 0; });
 
@@ -603,7 +606,7 @@ export function init(ctx) {
     contractsHtml: () => contractRows(false),
     onDeploy: () => { deploy(); const o = document.getElementById('overlay'); if (o) o.click(); }, // the click also captures the mouse
   });
-  ctx.raid = { toast, chime, get heat() { return ctx.heat ? ctx.heat.frac : 0; }, get heatTier() { return ctx.heat ? ctx.heat.tier : 1; }, menu, config: RAID, stash, get state() { return state; }, get pack() { return pack; }, get timeLeft() { return timeLeft; }, set timeLeft(t) { timeLeft = t; }, lootables, zones, deploy, endRaid, get armor() { return armor; }, get contracts() { return contracts; }, get keycards() { return keycards; }, get revealT() { return revealT; }, get packOpen() { return packOpen; }, get bagBonus() { return bagBonus; }, packSize, set keycards(n) { keycards = n; }, get phase() { const t = ctx.heat ? ctx.heat.tier : 1; return t >= 4 ? 2 : t >= 2 ? 1 : 0; }, setContracts(ids) { contracts = ids.map((id) => ({ def: CONTRACTS.find((c) => c.id === id), n: 0, done: false })); }, get medkits() { return medkits; } };
+  ctx.raid = { toast, chime, addLootable, rollContents, districtAt, get heat() { return ctx.heat ? ctx.heat.frac : 0; }, get heatTier() { return ctx.heat ? ctx.heat.tier : 1; }, menu, config: RAID, stash, get state() { return state; }, get pack() { return pack; }, get timeLeft() { return timeLeft; }, set timeLeft(t) { timeLeft = t; }, lootables, zones, deploy, endRaid, get armor() { return armor; }, get contracts() { return contracts; }, get keycards() { return keycards; }, get revealT() { return revealT; }, get packOpen() { return packOpen; }, get bagBonus() { return bagBonus; }, packSize, set keycards(n) { keycards = n; }, get phase() { const t = ctx.heat ? ctx.heat.tier : 1; return t >= 4 ? 2 : t >= 2 ? 1 : 0; }, setContracts(ids) { contracts = ids.map((id) => ({ def: CONTRACTS.find((c) => c.id === id), n: 0, done: false })); }, get medkits() { return medkits; } };
   setBots(false); player.protectT = 1e9;
   panel.hidden = true; menu.show(); saveStash(stash);
 

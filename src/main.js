@@ -17,6 +17,7 @@ import * as map from './map.js';
 import * as drones from './drones.js';
 import * as turrets from './turrets.js';
 import * as heat from './heat.js';
+import * as worldevents from './worldevents.js';
 import * as raid from './raid.js'; // director.js (free-for-all deathmatch) is kept in the repo but not loaded
 
 // Integration only: builds the shared ctx (see core.js) and runs every system each frame.
@@ -45,7 +46,7 @@ events.on('pieceSplit', ({ collider, parts }) => {
 events.on('pieceDestroyed', ({ collider }) => { if (collider.zipline) world.removeZipline(collider.zipline); });
 
 const systems = [];
-for (const [name, mod] of Object.entries({ destruction, decor, fx, audio, weapons, bots, raid, heat, detect, ui, dmgnum, settings, map, drones, turrets })) {
+for (const [name, mod] of Object.entries({ destruction, decor, fx, audio, weapons, bots, raid, heat, worldevents, detect, ui, dmgnum, settings, map, drones, turrets })) {
   try { const s = mod.init(ctx); if (s) systems.push({ name, ...s }); } catch (e) { console.error(`[${name}] init failed`, e); }
 }
 

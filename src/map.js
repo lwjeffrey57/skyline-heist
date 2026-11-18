@@ -73,6 +73,8 @@ export function init(ctx) {
       g.save(); g.translate(x, z); g.rotate(Math.PI / 4); g.fillStyle = zn.css || '#9be37a'; g.fillRect(-6, -6, 12, 12); g.restore();
       g.fillStyle = zn.css || '#9be37a'; g.fillText(zn.title || 'EXIT', x, z + (zn.z > 0 ? -15 : 15));
     }
+    // supply drops and the site commander's last reported position
+    if (ctx.worldEvents) for (const m of ctx.worldEvents.marks) { g.fillStyle = m.css; g.beginPath(); g.arc(X(m.x), Z(m.z), 6, 0, Math.PI * 2); g.fill(); g.fillText(m.title, X(m.x), Z(m.z) - 13); }
     // guards and drones, while a signal terminal's tap lasts
     if (raid && raid.revealT > 0) { g.fillStyle = '#ff5a4a'; for (const b of (ctx.bots ? ctx.bots.list : []).concat(ctx.drones ? ctx.drones.list : [], ctx.turrets ? ctx.turrets.list : [])) if (b.alive) { g.beginPath(); g.arc(X(b.pos.x), Z(b.pos.z), 3.5, 0, Math.PI * 2); g.fill(); } }
     // you: an arrow pointing where you face
