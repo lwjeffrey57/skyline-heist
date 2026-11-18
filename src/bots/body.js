@@ -47,6 +47,10 @@ function geos() {
     gunBody: box(0.06, 0.11, 0.34), gunStock: box(0.045, 0.09, 0.17), gunShroud: box(0.05, 0.065, 0.22), gunBarrel: cyl(0.016, 0.016, 0.3, 8),
     gunBrake: cyl(0.025, 0.025, 0.07, 8), gunMag: box(0.04, 0.17, 0.075), gunGrip: box(0.04, 0.1, 0.05), gunRail: box(0.014, 0.014, 0.26), gunSight: box(0.03, 0.045, 0.05),
     bar: new THREE.PlaneGeometry(1, 1),
+    // raider outfit
+    poncho: new THREE.CylinderGeometry(0.1, 0.36, 0.5, 10, 1, true), ruck: box(0.34, 0.46, 0.2), ruckFlap: box(0.3, 0.14, 0.03),
+    bedroll: cyl(0.085, 0.085, 0.44, 10), pouch: box(0.09, 0.11, 0.07), brim: cyl(0.27, 0.29, 0.022, 16), crown: cyl(0.1, 0.125, 0.07, 12),
+    goggle: new THREE.CylinderGeometry(0.119, 0.119, 0.03, 16, 1, true, -0.9, 1.8),
   };
   G.bar.translate(0.5, 0, 0);
   return G;
@@ -70,9 +74,11 @@ function pointLimb(group, from, to) {
 }
 
 export class BotBody {
-  constructor(scene, accentColor) {
-    this.scene = scene;
-    const g = geos();
+  // look: 'guard' (the Warden android) | 'raider' (a rival scavenger crew: ochre poncho, wide flat hat, big rucksack
+  // with a bedroll, dull cloth instead of ceramic plates, only a thin goggle strip glows)
+  constructor(scene, accentColor, look = 'guard') {
+    this.scene = scene; this.look = look;
+    const g = geos(), raider = look === 'raider';
     const M = this.mats = {
       suit: new THREE.MeshStandardMaterial({ color: 0x17191d, roughness: 0.82, metalness: 0.1 }),
       armor: new THREE.MeshStandardMaterial({ color: 0x343a44, roughness: 0.42, metalness: 0.65 }),
@@ -80,6 +86,14 @@ export class BotBody {
       accent: new THREE.MeshStandardMaterial({ color: 0x180804, emissive: accentColor, emissiveIntensity: 4.5, roughness: 0.4 }),
       gun: new THREE.MeshStandardMaterial({ color: 0x1b1d21, roughness: 0.38, metalness: 0.85 }),
     };
+    if (raider) {
+      M.suit.color.setHex(0x2e2a22); M.suit.roughness = 0.95;
+      M.armor.color.setHex(0x4d4a36); M.armor.roughness = 0.9; M.armor.metalness = 0.05;
+      M.plate.color.setHex(0x8a6f3c); M.plate.roughness = 0.95; M.plate.metalness = 0;
+      M.cloth = new THREE.MeshStandardMaterial({ color: 0xc08a2e, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+      M.cloth2 = new THREE.MeshStandardMaterial({ color: 0x5b6b3a, roughness: 1, metalness: 0 });
+      M.accent.emissiveIntensity = 2.2;
+    }
     M.visor = M.accent.clone(); M.visor.side = THREE.DoubleSide;
     this.matList = Object.values(M);
     const add = (parent, geo, mat, x = 0, y = 0, z = 0, shadow = true) => {
@@ -99,20 +113,34 @@ export class BotBody {
     add(T, g.ribs, M.armor, 0, 0.15, 0.1, false);
     add(T, g.chest, M.armor, 0, 0.33, 0);
     add(T, g.chestPlate, M.plate, 0, 0.36, 0.115).rotation.x = -0.12;
-    const core = add(T, g.core, M.accent, 0, 0.37, 0.158, false); core.rotation.x = Math.PI / 2;
     add(T, g.collar, M.suit, 0, 0.5, 0);
-    add(T, g.pack, M.armor, 0, 0.33, -0.185);
-    add(T, g.vent, M.accent, 0.075, 0.33, -0.255, false); add(T, g.vent, M.accent, -0.075, 0.33, -0.255, false);
-    for (const s of [1, -1]) { const sp = add(T, g.shoulder, M.plate, s * 0.235, 0.465, 0); sp.scale.set(1.12, 0.85, 1.15); }
-    const ant = add(T, g.antenna, M.gun, 0.1, 0.62, -0.21, false); ant.rotation.z = -0.1;
-    add(T, g.tip, M.accent, 0.118, 0.8, -0.21, false);
-
     const Hd = this.head = grp(T, 0, NECK_Y, 0);
-    add(Hd, g.helmet, M.plate, 0, 0.1, 0).scale.set(0.95, 1.04, 1.08);
-    add(Hd, g.visor, M.visor, 0, 0.105, 0.012, false).scale.set(0.99, 1, 1.1);
-    add(Hd, g.jaw, M.armor, 0, 0.015, 0.075);
-    add(Hd, g.fin, M.armor, 0, 0.215, -0.03);
-    for (const s of [1, -1]) add(Hd, g.ear, M.armor, s * 0.118, 0.09, -0.01).rotation.z = Math.PI / 2;
+    if (!raider) {
+      const core = add(T, g.core, M.accent, 0, 0.37, 0.158, false); core.rotation.x = Math.PI / 2;
+      add(T, g.pack, M.armor, 0, 0.33, -0.185);
+      add(T, g.vent, M.accent, 0.075, 0.33, -0.255, false); add(T, g.vent, M.accent, -0.075, 0.33, -0.255, false);
+      for (const s of [1, -1]) { const sp = add(T, g.shoulder, M.plate, s * 0.235, 0.465, 0); sp.scale.set(1.12, 0.85, 1.15); }
+      const ant = add(T, g.antenna, M.gun, 0.1, 0.62, -0.21, false); ant.rotation.z = -0.1;
+      add(T, g.tip, M.accent, 0.118, 0.8, -0.21, false);
+      add(Hd, g.helmet, M.plate, 0, 0.1, 0).scale.set(0.95, 1.04, 1.08);
+      add(Hd, g.visor, M.visor, 0, 0.105, 0.012, false).scale.set(0.99, 1, 1.1);
+      add(Hd, g.jaw, M.armor, 0, 0.015, 0.075);
+      add(Hd, g.fin, M.armor, 0, 0.215, -0.03);
+      for (const s of [1, -1]) add(Hd, g.ear, M.armor, s * 0.118, 0.09, -0.01).rotation.z = Math.PI / 2;
+    } else {
+      // poncho: a short open cone over the shoulders, longer at the back; a tall rucksack with a bedroll across the top
+      add(T, g.poncho, M.cloth, 0, 0.3, -0.01).scale.set(1.12, 1, 0.82);
+      add(T, g.ruck, M.cloth2, 0, 0.3, -0.25);
+      add(T, g.ruckFlap, M.plate, 0, 0.45, -0.345);
+      const roll = add(T, g.bedroll, M.cloth, 0, 0.6, -0.25); roll.rotation.z = Math.PI / 2;
+      add(T, g.pouch, M.plate, 0.17, 0.12, 0.1); add(T, g.pouch, M.plate, -0.17, 0.12, 0.1);
+      // head: cloth wrap, a wide flat hat, a thin glowing goggle strip
+      add(Hd, g.helmet, M.suit, 0, 0.1, 0).scale.set(0.9, 1.0, 1.0);
+      add(Hd, g.brim, M.cloth, 0, 0.175, 0);
+      add(Hd, g.crown, M.cloth, 0, 0.215, 0);
+      add(Hd, g.goggle, M.visor, 0, 0.105, 0.012, false);
+      add(Hd, g.jaw, M.cloth2, 0, 0.02, 0.07).scale.set(1.1, 1.3, 1.1);
+    }
 
     // weapon (origin = the stock against the shoulder, pointing +Z)
     const W = this.gun = grp(T);
@@ -260,7 +288,8 @@ export class BotBody {
   }
   setGlow(k) {
     if (this.glow === k) return; this.glow = k;
-    this.mats.visor.emissiveIntensity = 4.5 + 13 * k; this.mats.accent.emissiveIntensity = 4.5 + 5 * k;
+    const g0 = this.look === 'raider' ? 2.2 : 4.5;
+    this.mats.visor.emissiveIntensity = g0 + 13 * k; this.mats.accent.emissiveIntensity = g0 + 5 * k;
   }
 
   // s: { pos, bodyYaw, aimYaw, aimPitch, vel, grounded, aiming (0..1 target), hp01, showBar, camera, floorY,

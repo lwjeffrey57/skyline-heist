@@ -5,7 +5,7 @@ import { bump } from './progress.js';
 // Extraction mode. Deploy, search crates and fallen guards for loot, reach an extraction zone and hold it
 // to bank what you carry. Die or run out of time and the backpack is lost. Banked credits buy upgrades.
 
-const RAID = { time: 720, bots: 9, botDamage: 6, botRespawn: 25, extractHold: 6, extractRadius: 3.6, protect: 4 };
+const RAID = { time: 720, bots: 14, botDamage: 6, botRespawn: 25, extractHold: 6, extractRadius: 3.6, protect: 4 };
 const TIERS = {
   common: { color: '#c9d1d9', w: 60 }, uncommon: { color: '#5fd38a', w: 27 }, rare: { color: '#5aa9ff', w: 10 }, epic: { color: '#d48bff', w: 1.5 },
 };
@@ -475,6 +475,13 @@ export function init(ctx) {
     events.emit('raidEnd', { kind, value });
   }
   events.on('playerDied', () => endRaid('kia'));
+  // rival crews really take what they stop to loot, unless you are close enough to contest it
+  events.on('raidersLooting', (e) => {
+    const L = e.lootable;
+    if (state !== 'raid' || !L || L.opened || L.busy || L.locked || L.kind === 'locker' || L.kind === 'terminal' || !lootables.includes(L)) return;
+    if (Math.hypot(L.pos.x - player.pos.x, L.pos.z - player.pos.z) < 30) return;
+    L.opened = true; L.items = []; L.strip.material = mats(L.kind).dead;
+  });
   events.on('botDied', (e) => {
     if (state !== 'raid' || !e.point) return;
     if (e.by === player) { // progress on trader tasks
@@ -482,6 +489,7 @@ export function init(ctx) {
       if (ctx.weapons && ctx.weapons.current && ctx.weapons.current.def.id === 'pistol' && !(e.bot && (e.bot.kind === 'drone' || e.bot.kind === 'turret'))) bump(stash, 'pistolKill');
     }
     // tougher enemy types carry better loot
+    if (e.by !== player && !(e.bot && e.bot.kind === 'raider') && !(e.bot && e.bot.hvt) && Math.hypot(e.point.x - player.pos.x, e.point.z - player.pos.z) > 60) return; // far-off guard deaths leave nothing
     const rich = e.bot && (e.bot.kind === 'heavy' || e.bot.kind === 'marksman');
     const commander = e.bot && e.bot.hvt, raider = e.bot && e.bot.kind === 'raider';
     const L = addLootable('bag', e.point.x + rnd(-0.4, 0.4), floorBelow(e.point.x, e.point.y, e.point.z), e.point.z + rnd(-0.4, 0.4), Math.random() * 3);

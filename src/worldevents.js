@@ -91,6 +91,10 @@ export function init(ctx) {
     if (mine && ctx.heat) ctx.heat.add(6);
   });
 
+  events.on('raidersEntered', () => { if (active) { say('Another crew has entered the site', '#e0a83a'); chime([330, 277], 0.16, 0.3, 0.16, 'triangle'); } });
+  events.on('raiderSquadDown', () => { if (active) say('A rival crew has been wiped out', '#e0a83a'); });
+  events.on('raidersLeaving', () => { if (active) say('A rival crew is heading for an exit with their haul', '#e0a83a'); });
+
   return {
     update(dt) {
       if (!active || !ctx.raid || ctx.raid.state !== 'raid') return;

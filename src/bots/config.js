@@ -158,6 +158,32 @@ export const CONFIG = {
   aggrReaction: 0.4,           // at aggression 1 reaction times are this much shorter
   calloutInterval: 0.9,        // min s between any two botCallout events (and 5 s between two of the same kind)
 
+  // ---- factions, squads, level of detail ------------------------------------
+  // Guards and raiders are hostile to each other and both to the player (bot.faction: 'guard' | 'raider').
+  botVsBotDamage: 2.6,         // multiplier on rounds one bot lands on another (their fights should not drag on)
+  foeViewDist: 55,             // m at which a bot notices a hostile bot it has line of sight to
+  hearFoeShotDist: 48,         // m: gunfire that is not aimed at the player draws bots of either side this close
+  squadEarshot: 38,            // m: squadmates this close come at once when one of them spots the player / a raider
+  farDist: 100,                // m from the player beyond which a bot runs the cheap update (never while the player is scoped in)
+  farTick: 0.08,               // s between updates of a far bot
+  postStand: [6, 14],          // s a posted guard stands before it looks another way / takes a few steps
+  talkChance: 0.4,             // chance a patrol pair stops to talk at a waypoint
+  postShare: 1,                // share of the post slots that are filled (aggression takes up to 75 % of them off their posts)
+  patrolEvery: 2,              // after every N posted squads the next guards form a 2-man road patrol
+  raiders: {
+    squads: 2,                 // squads that enter at raid start (ctx.bots.respawnAll()); 0 = none
+    size: [2, 3],              // raiders per squad
+    enterDelay: [3, 30],       // s after raid start
+    stay: [210, 330],          // s on site before the squad heads for an exit
+    lootTime: [9, 20],         // s spent at each place it stops at
+    minPlayerDist: 130,        // enter at least this far from the player
+    bodyTime: 14,              // s a dead raider stays in the world (they do not respawn)
+    kind: { label: 'Raider', scale: 1.04, color: 0x8dff5a,
+      set: { hp: 150, reactionTime: [0.3, 0.5], burst: [3, 5], retreatHp: 60, defensiveChance: 0.6, staggerResist: 0.85, tellTime: 0.3,
+        accuracyByRange: [[0, 0.78], [10, 0.65], [20, 0.45], [35, 0.25], [50, 0.13], [70, 0.06]] },
+      mul: { damage: 1.2 } },
+  },
+
   // ---- navigation ---------------------------------------------------------
   nav: {
     cell: 0.5,                 // grid resolution (m)
