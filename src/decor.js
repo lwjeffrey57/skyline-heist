@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { createDressing } from './visuals/dressing.js';
 
 // Detail geometry. Nothing here collides.
 //   * anything that belongs to a destructible piece is a CHILD of that piece's mesh (one merged mesh per
@@ -75,13 +76,13 @@ class Batch {
 }
 
 // ---- canvas atlases ---------------------------------------------------------------
-function makeAtlas(renderer, size, draw) {
-  const c = document.createElement('canvas'); c.width = c.height = size;
+function makeAtlas(renderer, size, draw, wide = 1) {
+  const c = document.createElement('canvas'); c.height = size; c.width = size * wide;
   const g = c.getContext('2d'); const rects = {};
   // cell(name, x, y, w, h, fn): fn draws inside a translated/clipped cell
   const cell = (name, x, y, w, h, fn) => {
     g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip(); g.translate(x, y); fn(g, w, h); g.restore();
-    const e = 1.5 / size; rects[name] = [x / size + e, 1 - (y + h) / size + e, (x + w) / size - e, 1 - y / size - e];
+    const e = 1.5 / size, W = size * wide; rects[name] = [x / W + e / wide, 1 - (y + h) / size + e, (x + w) / W - e / wide, 1 - y / size - e];
   };
   draw(cell, g);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
@@ -102,6 +103,11 @@ export function init(ctx) {
   const V = (x, y, z) => new THREE.Vector3(x, y, z);
   const lamps = []; // { pos, color, intensity, parent (mesh or null) }
   let children = 0;
+  // ?nodecor=1 switches the set dressing (visuals/dressing.js) and the distance culls below off, for before / after comparisons
+  const NODECOR = /[?&]nodecor=1/.test(typeof location !== 'undefined' ? location.search : '');
+  // small detail meshes that hang off level pieces, grouped by where they are so they can be hidden when far away
+  const kidGroups = new Map(); // key -> { x, z, range, far, meshes }
+  const kid = (m, key, x, z, range) => { let g = kidGroups.get(key); if (!g) kidGroups.set(key, (g = { x, z, range, far: false, meshes: [] })); g.meshes.push(m); return m; };
 
   // ---- 0. hide the placeholder skyline that world.js builds (replaced below) -------
   for (const o of scene.children) {
@@ -144,7 +150,20 @@ export function init(ctx) {
       g.fillStyle = '#e9e5da'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = font(92, 900);
       g.fillText(`S-${L}`, w / 2, h / 2 + 6); wear(g, w, h, r, 500);
     }));
-  });
+    // sign plates (right half): gate names, what each outpost is
+    ['N1', 'N2', 'S1', 'S2', 'W1', 'E1'].forEach((L, i) => cell(`gate${i}`, 1024 + (i % 2) * 512, Math.floor(i / 2) * 100, 512, 90, (g, w, h) => {
+      g.fillStyle = '#15171b'; g.fillRect(0, 0, w, h); g.fillStyle = '#e9a321'; g.fillRect(0, 0, w, 7); g.fillRect(0, h - 7, w, 7);
+      g.textBaseline = 'middle'; g.font = font(60, 900); g.fillText(`GATE ${L}`, 22, h / 2 + 3);
+      g.fillStyle = '#e8e2d0'; g.font = font(20, 700); g.fillText('INNER COMPOUND', 300, 32); g.fillText('STOP · SHOW PASS', 300, 60);
+      wear(g, w, h, r, 260);
+    }));
+    [['armoury', 'ARMOURY', '#7a2a22'], ['infirmary', 'INFIRMARY', '#1d6a6b'], ['signal', 'SIGNAL STATION', '#24364f'], ['depot', 'SUPPLY DEPOT', '#8a5a14'], ['watch', 'WATCH POST', '#3d4a33']].forEach(([key, label, bg], i) => cell(`op_${key}`, 1024 + (i % 2) * 512, 310 + Math.floor(i / 2) * 134, 512, 128, (g, w, h) => {
+      g.fillStyle = bg; g.fillRect(0, 0, w, h); g.strokeStyle = '#efe9d8'; g.lineWidth = 5; g.strokeRect(8, 8, w - 16, h - 16);
+      g.fillStyle = '#efe9d8'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = font(62, 900); g.fillText(label, w / 2, 52, w - 40);
+      g.font = font(19, 700); g.fillText(`OUTPOST 0${i + 1} · AUTHORISED STAFF ONLY`, w / 2, 100);
+      wear(g, w, h, r, 420);
+    }));
+  }, 2);
   const groundAtlas = makeAtlas(renderer, 1024, (cell) => {
     const r = rng(9);
     cell('hazard', 0, 0, 512, 512, (g, w, h) => { // chevron ring around a jump pad
@@ -187,7 +206,34 @@ export function init(ctx) {
       g.fillStyle = 'rgba(14,14,16,0.5)'; g.fillRect(10, 10, w - 20, h - 20);
       g.strokeStyle = 'rgba(5,5,6,0.7)'; g.lineWidth = 6; g.strokeRect(10, 10, w - 20, h - 20);
     });
-  });
+    // road paint (right half)
+    cell('line', 1024, 0, 64, 512, (g, w, h) => { g.fillStyle = '#e6e0cf'; g.fillRect(0, 0, w, h); wear(g, w, h, r, 420); });
+    cell('yline', 1100, 0, 64, 512, (g, w, h) => { g.fillStyle = '#d99a1c'; g.fillRect(0, 0, w, h); wear(g, w, h, r, 520); });
+    cell('zebra', 1180, 0, 840, 96, (g, w, h) => {
+      g.fillStyle = '#16181b'; g.fillRect(0, 0, w, h); g.fillStyle = '#e9a321';
+      for (let x = -h; x < w; x += 96) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + 48, h); g.lineTo(x + 48 + h, 0); g.lineTo(x + h, 0); g.fill(); }
+      wear(g, w, h, r, 1500);
+    });
+    cell('stop', 1180, 110, 512, 232, (g, w, h) => { g.fillStyle = '#ece6d4'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = font(230, 900); g.fillText('STOP', w / 2, h / 2 + 14, w - 20); wear(g, w, h, r, 2000); });
+    ['N1', 'N2', 'S1', 'S2', 'W1', 'E1'].forEach((L, i) => cell(`gname${i}`, 1180 + (i % 2) * 420, 350 + Math.floor(i / 2) * 150, 400, 140, (g, w, h) => {
+      g.fillStyle = '#e9a321'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = font(120, 900); g.fillText(`GATE ${L}`, w / 2, h / 2 + 8, w - 20); wear(g, w, h, r, 1300);
+    }));
+    // large tonal patches that go UNDER the paint: poured concrete aprons, bare dirt, gravel shoulders
+    cell('pad', 1700, 110, 330, 230, (g, w, h) => {
+      g.fillStyle = 'rgba(168,164,154,0.5)'; g.fillRect(6, 6, w - 12, h - 12);
+      for (let i = 0; i < 260; i++) { g.fillStyle = `rgba(${r() < 0.5 ? '40,40,42' : '205,200,190'},${0.03 + r() * 0.05})`; const sz = 6 + r() * 40; g.fillRect(6 + r() * (w - 12 - sz), 6 + r() * (h - 12 - sz), sz, sz * (0.4 + r())); }
+      g.strokeStyle = 'rgba(20,20,22,0.55)'; g.lineWidth = 2; for (let i = 1; i < 5; i++) { g.beginPath(); g.moveTo(6 + (i * (w - 12)) / 5, 6); g.lineTo(6 + (i * (w - 12)) / 5, h - 6); g.stroke(); } for (let i = 1; i < 4; i++) { g.beginPath(); g.moveTo(6, 6 + (i * (h - 12)) / 4); g.lineTo(w - 6, 6 + (i * (h - 12)) / 4); g.stroke(); }
+      g.lineWidth = 3; g.strokeStyle = 'rgba(15,15,17,0.6)'; g.strokeRect(6, 6, w - 12, h - 12);
+    });
+    for (const [name, x0, tone] of [['dirt', 1410, '92,74,52'], ['verge', 1640, '120,112,98']]) cell(name, x0, 800, 220, 220, (g, w, h) => {
+      for (let i = 0; i < 60; i++) { const x = w / 2 + (r() - 0.5) * 120, y = h / 2 + (r() - 0.5) * 120, rad = 22 + r() * 50; const gr = g.createRadialGradient(x, y, 0, x, y, rad); gr.addColorStop(0, `rgba(${tone},0.22)`); gr.addColorStop(1, `rgba(${tone},0)`); g.fillStyle = gr; g.fillRect(0, 0, w, h); }
+      for (let i = 0; i < 500; i++) { const an = r() * 6.28, d = r() * r() * 92; g.fillStyle = `rgba(${r() < 0.5 ? '30,26,20' : '170,160,140'},${0.15 + r() * 0.3})`; g.fillRect(w / 2 + Math.cos(an) * d, h / 2 + Math.sin(an) * d, 1 + r() * 2.5, 1 + r() * 2.5); }
+    });
+    cell('crack', 1180, 800, 220, 220, (g, w, h) => {
+      g.strokeStyle = 'rgba(6,6,8,0.75)'; g.lineCap = 'round';
+      for (let i = 0; i < 5; i++) { let x = w / 2 + (r() - 0.5) * 40, y = h / 2 + (r() - 0.5) * 40, an = r() * 6.28; g.lineWidth = 1.5 + r() * 2; g.beginPath(); g.moveTo(x, y); for (let j = 0; j < 9; j++) { an += (r() - 0.5) * 1.3; x += Math.cos(an) * 12; y += Math.sin(an) * 12; g.lineTo(x, y); if (j > 4) g.lineWidth *= 0.8; } g.stroke(); }
+    });
+  }, 2);
   const decalOpts = { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4, roughness: 0.82, metalness: 0 };
   const wallDecalMat = new THREE.MeshStandardMaterial({ map: wallAtlas.texture, ...decalOpts, opacity: 0.86 });
   const groundDecalMat = new THREE.MeshStandardMaterial({ map: groundAtlas.texture, ...decalOpts, opacity: 0.9 });
@@ -206,14 +252,15 @@ export function init(ctx) {
       const u = alongX ? V(s * 2.3, 0, 0) : V(0, 0, -s * 2.3);
       decal.quad(P(-0.3 * s * (alongX ? 1 : -1), sy / 2 - 0.62, s * (wid / 2 + 0.012)), u, V(0, 0.235, 0), brand);
     }
-    const dm = decal.mesh(wallDecalMat); c.mesh.add(dm); children++;
+    const cmx = (c.min.x + c.max.x) / 2, cmz = (c.min.z + c.max.z) / 2;
+    const dm = decal.mesh(wallDecalMat); c.mesh.add(dm); children++; kid(dm, `c${ci}`, cmx, cmz, 120);
     const gear = new Batch(), e = len / 2 + 0.03;
     const B = (a, y, n, la, h, ln) => (alongX ? gear.box(a, y, n, la, h, ln, 0.3) : gear.box(n, y, a, ln, h, la, 0.3));
     for (const n of [-0.85, -0.3, 0.3, 0.85]) { B(e, 0, n, 0.045, sy - 0.24, 0.045); B(e + 0.02, -0.25, n + 0.07, 0.03, 0.05, 0.16); }
     for (const y of [-sy / 2 + 0.2, sy / 2 - 0.2]) for (const n of [-0.85, -0.3, 0.3, 0.85]) B(e, y, n, 0.07, 0.09, 0.11);
     B(e - 0.02, 0, 0, 0.03, sy - 0.2, 0.03); // door split
     for (const s of [-1, 1]) for (const cn of [-1, 1]) for (const cy of [-1, 1]) B(s * (len / 2 - 0.09), cy * (sy / 2 - 0.06), cn * (wid / 2 - 0.08), 0.2, 0.14, 0.18); // corner castings
-    c.mesh.add(gear.mesh(M.trim)); children++;
+    c.mesh.add(kid(gear.mesh(M.trim), `g${ci}`, cmx, cmz, 75)); children++;
     ci++;
   }
 
@@ -230,13 +277,18 @@ export function init(ctx) {
     const alongX = size(c, 'x') > size(c, 'z'), m = mid(c);
     return { alongX, out: alongX ? (m.z > b.z ? 1 : -1) : (m.x > b.x ? 1 : -1) };
   };
-  const attach = (c, batch, material, opts) => { if (batch.empty) return null; const m = batch.mesh(material, opts); c.mesh.add(m); children++; return m; };
+  let curB = null; // the building whose pieces are being dressed
+  const attach = (c, batch, material, opts) => {
+    if (batch.empty) return null; const m = batch.mesh(material, opts); c.mesh.add(m); children++;
+    if (curB) { const far = material === wallDecalMat || material === M.glowWarm; kid(m, `${world.buildings.indexOf(curB)}${far ? 'f' : 'n'}`, curB.x, curB.z, (far ? 150 : 82) + Math.max(curB.w, curB.d) / 2); }
+    return m;
+  };
   const sills = pieces.filter((c) => c.tag === 'sill');
   const lettered = new Set();
 
   for (const c of pieces) {
     const b = buildingOf(c); if (!b) continue;
-    const bi = world.buildings.indexOf(b);
+    const bi = world.buildings.indexOf(b); curB = b;
     if (c.tag === 'lintel') {
       const { alongX, out } = facing(c, b), th = b.wallThickness, len = alongX ? size(c, 'x') : size(c, 'z');
       const m = mid(c), hy = size(c, 'y') / 2, bat = new Batch();
@@ -300,6 +352,7 @@ export function init(ctx) {
   for (const list of byFloor.values()) {
     list.sort((a, b2) => size(b2, 'x') * size(b2, 'z') - size(a, 'x') * size(a, 'z'));
     for (const c of list.slice(0, 2)) {
+      curB = buildingOf(c);
       const alongX = size(c, 'x') > size(c, 'z'), hy = size(c, 'y') / 2;
       const housing = new Batch(), glow = new Batch();
       if (alongX) { housing.box(0, -hy - 0.035, 0, 1.5, 0.07, 0.24, 0.3); glow.box(0, -hy - 0.075, 0, 1.36, 0.02, 0.15); }
@@ -308,6 +361,7 @@ export function init(ctx) {
       lamps.push({ pos: mid(c).add(V(0, -hy - 0.5, 0)), color: 0xffd2a4, intensity: 20, parent: c.mesh });
     }
   }
+  curB = null;
   // detail on the solid rooftop units that world.js places
   for (const c of world.colliders) {
     if (c.tag !== 'prop' || c.mat !== M.metal || !c.mesh || c.min.y < 3 || size(c, 'y') > 2.5 || size(c, 'x') < 1.5) continue;
@@ -357,10 +411,11 @@ export function init(ctx) {
   const addStatic = (batch, material, opts) => { if (!batch.empty) statics.add(batch.mesh(material, opts)); };
 
   // ground decals (one mesh)
-  const gd = new Batch(), GY = 0.021;
-  const ground = (name, x, z, w, d, rot = 0) => {
+  const gd = new Batch(), gdUnder = new Batch(), GY = 0.021;
+  const ground = (name, x, z, w, d, rot = 0, under = false) => {
+    if (!groundAtlas.rects[name]) return;
     const c = Math.cos(rot), s = Math.sin(rot);
-    gd.quad(V(x, GY, z), V((c * w) / 2, 0, (-s * w) / 2), V((-s * d) / 2, 0, (-c * d) / 2), groundAtlas.rects[name]);
+    (under ? gdUnder : gd).quad(V(x, GY, z), V((c * w) / 2, 0, (-s * w) / 2), V((-s * d) / 2, 0, (-c * d) / 2), groundAtlas.rects[name]);
   };
   for (const p of world.pads) ground('hazard', p.x, p.z, 5.2, 5.2, rand() * 6);
   ground('arrow', 0, 34, 1.6, 4.2, 0); ground('arrow', -22, 14, 1.6, 4.2, 0.9); ground('arrow', 24, 4, 1.6, 4.2, -1.2); ground('arrow', 30, -34, 1.6, 4.2, 2.4);
@@ -371,9 +426,21 @@ export function init(ctx) {
   for (let i = 0; i < 26; i++) { const x = (rand() - 0.5) * 124, z = (rand() - 0.5) * 124; ground('stain', x, z, 3 + rand() * 5, 3 + rand() * 5, rand() * 6); }
   for (const [x, z, r] of [[5, 40, 0.2], [-18, 44, -0.3], [28, 12, 1.3], [-40, 2, 1.7], [-4, -22, 0.1], [44, -14, 0.5], [18, 58, 1.5]]) ground('skid', x, z, 2.6, 9 + rand() * 5, r);
   for (const [x, z, r] of [[14, 36, 0.1], [-36, 14, 1.6], [38, -44, 0.3], [-22, -40, 1.5], [54, 44, 0.0]]) ground('patch', x, z, 3.2, 5, r);
-  { const m = gd.mesh(groundDecalMat); m.renderOrder = -5; statics.add(m); }
-  // sector numbers along the perimeter wall
+  // furniture, vehicles, street furniture, roof plant (adds its own paint to the two decal batches)
   const wd = new Batch();
+  let dressing = null;
+  if (!NODECOR) {
+    try { dressing = createDressing(ctx, { lamps, ground, sign: (name, c, u, v) => { if (wallAtlas.rects[name]) wd.quad(c, u, v, wallAtlas.rects[name]); } }); } catch (e) { console.error('[decor] dressing failed', e); }
+    // stair treads are indoors, under a roof: they do not need to be drawn into the sun's shadow maps
+    for (const c of world.colliders) if (c.tag === 'stair' && c.mesh) c.mesh.castShadow = false;
+  }
+  { // one mesh: the under-layer patches first, so the paint is drawn over them
+    const base = gdUnder.p.length / 3;
+    for (const k of ['p', 'n', 'uv', 'f']) gdUnder[k] = gdUnder[k].concat(gd[k]);
+    for (const i of gd.idx) gdUnder.idx.push(i + base);
+    const m = gdUnder.mesh(groundDecalMat); m.renderOrder = -5; statics.add(m);
+  }
+  // sector numbers along the perimeter wall
   for (let i = 0; i < 8; i++) {
     const side = i % 4, k = i < 4 ? -30 : 30, r = wallAtlas.rects[`num${i}`], hw = 2.6, hh = 1.2, e = H - 0.02;
     if (side === 0) wd.quad(V(k, 3.4, -e), V(hw, 0, 0), V(0, hh, 0), r);
@@ -513,11 +580,38 @@ export function init(ctx) {
   assignLamps();
 
   ctx.events.on('pieceDestroyed', () => { if (view.shadowsDirty) view.shadowsDirty(); });
-  const info = { children, lamps: lamps.length };
+  // ---- 7. distance culls and the site-wide alarm look ---------------------------------------
+  const kids = [...kidGroups.values()];
+  const lastCull = new THREE.Vector3(1e9, 0, 0); let frame = 0, alarmOn = false;
+  function cullKids(cp) {
+    let hidden = 0;
+    for (const g of kids) {
+      const far = Math.hypot(g.x - cp.x, g.z - cp.z) > g.range;
+      if (far !== g.far) { g.far = far; for (const m of g.meshes) m.visible = !far; }
+      if (far) hidden += g.meshes.length;
+    }
+    info.hiddenChildren = hidden;
+  }
+  const AMBER = new THREE.Color(0xffa53a), RED = new THREE.Color(0xff2a14);
+  const info = { children, lamps: lamps.length, dressing: dressing ? dressing.stats : null, hiddenChildren: 0 };
+  ctx.decor = { info, dressing };
   return {
     info,
     update(dt) {
       assignLamps();
+      if (NODECOR) return;
+      if (dressing) {
+        dressing.update(dt);
+        // as the heat rises the amber site lighting (door lights, parapet strips, gate lamps) goes red and starts to pulse
+        const a = dressing.uniforms.alarm.value;
+        if (a > 0.004 || alarmOn) {
+          alarmOn = a > 0.004;
+          M.glowAmber.emissive.lerpColors(AMBER, RED, a);
+          M.glowAmber.emissiveIntensity = 5 * (1 + a * (0.35 + 0.65 * Math.sin(ctx.time * 6.5)));
+        }
+      }
+      const cp = camera.position;
+      if (frame++ % 20 === 0 || Math.abs(cp.x - lastCull.x) + Math.abs(cp.z - lastCull.z) > 6) { lastCull.copy(cp); cullKids(cp); }
     },
   };
 }
