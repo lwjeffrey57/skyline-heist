@@ -3,6 +3,7 @@ import { Particles, preset, TILE_SMOKE, TILE_CHIP, TILE_RING, TILE_STAR_A, TILE_
 import { Decals, DECAL_CONCRETE, DECAL_METAL, DECAL_SCORCH } from './fx/decals.js';
 import { Tracers } from './fx/tracers.js';
 import { createScreen } from './fx/screen.js';
+import { nearMiss, NEAR_MISS } from './fx/nearmiss.js';
 
 // Transient visual effects. Purely reactive: listens to ctx.events and renders.
 // Draw calls: 2 particle systems (soft = smoke/dust/chips, glow = fire/sparks/flashes), 1 decal mesh,
@@ -44,7 +45,10 @@ const P = {
   hsRingSlow: preset({ tile: TILE_RING, life: [0.5, 0.6], speed: [0, 0], size0: [0.4, 0.5], size1: [3.6, 4.2], col0: [12, 4, 0.9], col1: [3, 0.4, 0.1], alpha: [0.8, 0.9], add0: 1, add1: 1, fadeIn: 0, fadeOut: 0.05, rot: 0 }),
   hsShard: preset({ tile: TILE_SHARD, life: [0.35, 0.75], speed: [3, 9.5], spread: 0.8, size0: [0.09, 0.17], size1: [0.05, 0.08], col0: [14, 4.2, 1.0], col1: [3, 0.4, 0.08], add0: 1, add1: 1, gravity: 9, drag: 1.6, rotSpeed: 16, fadeIn: 0, fadeOut: 0.6, lift: 1.5 }),
   hsSpark: preset({ life: [0.2, 0.5], speed: [5, 14], spread: 1, size0: [0.03, 0.045], size1: [0.01, 0.012], col0: [16, 7, 2], col1: [6, 0.8, 0.1], add0: 1, add1: 1, gravity: 8, drag: 2.5, stretch: 0.035, rot: 0 }),
-  // energy hits on characters (non-gory)
+  // hits on the armoured guards (non-gory): sparks off the plate, a glancing spray along the line of fire, ceramic chips
+  enSpray: preset({ life: [0.14, 0.32], speed: [5, 13], spread: 0.36, size0: [0.028, 0.045], size1: [0.01, 0.012], col0: [4, 12, 12], col1: [0.2, 2, 7], add0: 1, add1: 1, gravity: 5, drag: 3.5, stretch: 0.035, rot: 0 }),
+  plateChip: preset({ tile: TILE_CHIP, life: [0.5, 0.9], speed: [2, 5.5], spread: 0.6, size0: [0.025, 0.06], size1: [0.025, 0.05], col0: [0.78, 0.76, 0.72], col1: [0.78, 0.76, 0.72], gravity: 13, drag: 0.8, rotSpeed: 14, fadeOut: 0.8, colVar: 0.25 }),
+  nearDust: preset({ tile: TILE_SMOKE, life: [0.6, 1.1], speed: [1.5, 4], spread: 0.5, size0: [0.12, 0.2], size1: [0.6, 1.0], col0: [0.62, 0.59, 0.54], col1: [0.62, 0.59, 0.54], tint: 0.5, alpha: [0.3, 0.45], drag: 3.5, lift: 0.15, fadeIn: 0.04, fadeOut: 0.15, rotSpeed: 1 }),
   enFlash: preset({ life: [0.07, 0.1], speed: [0, 0], size0: [0.45, 0.6], size1: [0.15, 0.2], col0: [3, 11, 12], col1: [0.4, 3, 8], add0: 1, add1: 1, fadeIn: 0, fadeOut: 0.2 }),
   enShard: preset({ life: [0.15, 0.4], speed: [3, 10], spread: 1, size0: [0.03, 0.05], size1: [0.01, 0.012], col0: [4, 12, 12], col1: [0.2, 2, 7], add0: 1, add1: 1, gravity: 3, drag: 4, stretch: 0.035, rot: 0 }),
   enRing: preset({ tile: TILE_RING, life: [0.16, 0.22], speed: [0, 0], size0: [0.15, 0.2], size1: [0.9, 1.2], col0: [2, 9, 10], col1: [0.2, 2, 6], alpha: [0.7, 0.9], add0: 1, add1: 1, fadeIn: 0, fadeOut: 0.1, rot: 0 }),
@@ -157,7 +161,7 @@ export function init(ctx) {
   const DOWN = new THREE.Vector3(0, -1, 0), qInv = new THREE.Quaternion();
   const tintC = new THREE.Color(), GREY = new THREE.Color(0.5, 0.48, 0.45);
   const lastShot = new WeakMap(); // shooter -> { t, mx,my,mz, dx,dy,dz, cls }
-  let frameDust = 0, frameImpacts = 0, zipping = false, zipT = 0, slideT = 0;
+  let frameDust = 0, frameImpacts = 0, zipping = false, zipT = 0, slideT = 0, nearMisses = 0;
 
   const isMetal = (c) => !!c && (c.tag === 'container' || c.mat === world.materials.metal || (c.mat && c.mat.metalness > 0.5));
   function surfaceTint(c) {
@@ -206,7 +210,7 @@ export function init(ctx) {
     // through a magnifying scope the flash would fill the lens: nearly remove it there
     const scoped = mine && ads > 0.5 && player.fovScale < 0.6;
     const vis = mine ? (scoped ? 0.1 : (1 - 0.45 * ads) * (1 - 0.3 * camIndoor)) : 1;
-    const s = (mine ? (scoped ? 0.35 : 1 - 0.35 * ads) : 1 + Math.min(1.5, far * 0.022)) * (0.82 + Math.random() * 0.36);
+    const s = (mine ? (scoped ? 0.35 : 0.85 - 0.3 * ads) : 1 + Math.min(1.5, far * 0.022)) * (0.82 + Math.random() * 0.36);
     const fx_ = m.x + d.x * 0.06, fy_ = m.y + d.y * 0.06, fz_ = m.z + d.z * 0.06;
     setLight(m.x, m.y, m.z);
     let n = 0;
@@ -260,6 +264,9 @@ export function init(ctx) {
     if (mine) {
       screen.kick(C.kick * (0.85 + Math.random() * 0.3), (Math.random() - 0.5) * C.kick * 0.7, (Math.random() - 0.5) * C.kick * 0.9);
       if (C.trauma > 0) screen.addTrauma(C.trauma, 0.12 + C.trauma);
+    } else if (player.alive) { // a round cracking past the head: the edges of the view close in for a moment
+      const miss = nearMiss(e, camera.position, world, v2);
+      if (miss >= 0) { nearMisses++; screen.suppress(1 - miss / NEAR_MISS); events.emit('nearMiss', { dist: miss, point: v2.clone(), by: e.by }); }
     }
   });
 
@@ -296,21 +303,28 @@ export function init(ctx) {
     const px = p.x + n.x * 0.03, py = p.y + n.y * 0.03, pz = p.z + n.z * 0.03;
     if (e.kind === 'flesh') {
       if (e.target === player) return; // the player's own pain is screen-space (vignette), see playerDamaged
+      const shotFresh = rec && ctx.time - rec.t < 0.05;
       if (e.headshot) {
-        // sharp visor-orange pop that still reads at 40 m (sizes grow with distance)
-        const ds = Math.min(7, Math.max(1.2, dist * 0.2)); // roughly constant size on screen: bigger than the HUD hitmarker
-        glow.burst(P.hsStar, 2, px, py, pz, n.x, n.y, n.z, ds * 2.6);   // long thin rays: reads past the HUD hitmarker
-        glow.burst(P.hsCore, 1, px, py, pz, n.x, n.y, n.z, ds * 1.8);
-        glow.burst(P.hsRing, 1, px, py, pz, n.x, n.y, n.z, ds);
-        glow.burst(P.hsShard, 10, px, py, pz, n.x, n.y + 0.4, n.z, 0.6 + ds * 0.45, null, -1e4, 0.6 + ds * 0.4);
-        glow.burst(P.hsSpark, 12, px, py, pz, n.x, n.y, n.z, 0.6 + ds * 0.4, null, -1e4, 0.6 + ds * 0.4);
-        flashLight(px + n.x * 0.3, py + n.y * 0.3, pz + n.z * 0.3, 1, 0.42, 0.12, 110, 12, 0.12);
+        // a compact visor-orange pop: one small star, a hot core and a few sparks. Restrained on purpose -
+        // the hitmarker, the damage number and the sound already say "headshot"; this must not hide the target.
+        const ds = Math.min(3, Math.max(1, dist * 0.09));
+        glow.burst(P.hsStar, 1, px, py, pz, n.x, n.y, n.z, ds * 0.8);
+        glow.burst(P.hsCore, 1, px, py, pz, n.x, n.y, n.z, ds * 0.55);
+        glow.burst(P.hsSpark, Math.round(7 * lod), px, py, pz, n.x, n.y, n.z, 0.6 + ds * 0.3, null, -1e4, 0.6 + ds * 0.3);
+        glow.burst(P.hsShard, 4, px, py, pz, n.x, n.y + 0.4, n.z, 0.5 + ds * 0.25, null, -1e4, 0.6 + ds * 0.3);
+        flashLight(px + n.x * 0.3, py + n.y * 0.3, pz + n.z * 0.3, 1, 0.42, 0.12, 40, 7, 0.08);
         return;
       }
-      const bs = s * Math.min(5, Math.max(1, dist * 0.13));
-      glow.burst(P.enFlash, 1, px, py, pz, n.x, n.y, n.z, bs);
-      glow.burst(P.enRing, 1, px, py, pz, n.x, n.y, n.z, bs);
-      glow.burst(P.enShard, Math.round(9 * lod * s), px, py, pz, n.x, n.y, n.z, 0.6 + bs * 0.4, null, -1e4, 0.6 + bs * 0.4);
+      const bs = s * Math.min(3, Math.max(1, dist * 0.09));
+      glow.burst(P.enFlash, 1, px, py, pz, n.x, n.y, n.z, bs * 0.7);
+      // sparks back off the plate toward the shooter ...
+      glow.burst(P.enShard, Math.round(5 * lod * s), px, py, pz, n.x, n.y, n.z, 0.6 + bs * 0.3, null, -1e4, 0.6 + bs * 0.3);
+      // ... and a tighter spray glancing off along the line of fire, so the hit shows which way the round was going
+      if (shotFresh) {
+        const dn = rec.dx * n.x + rec.dy * n.y + rec.dz * n.z;
+        glow.burst(P.enSpray, Math.round(6 * lod * s), px, py, pz, n.x * 0.55 + (rec.dx - dn * n.x), n.y * 0.55 + (rec.dy - dn * n.y) + 0.15, n.z * 0.55 + (rec.dz - dn * n.z), 0.6 + bs * 0.3, null, -1e4, 0.7 + bs * 0.3);
+      }
+      if (dist < 35 && lod >= 0.7) { setLight(px, py, pz); soft.burst(P.plateChip, 3, px, py, pz, n.x, n.y, n.z, 1 + bs * 0.2); }
       return;
     }
     const c = e.collider, metal = isMetal(c);
@@ -335,6 +349,12 @@ export function init(ctx) {
         soft.burst(P.impHang, 1, px + n.x * 0.15, py + n.y * 0.15, pz + n.z * 0.15, n.x, n.y, n.z, s, t, -1e4, 1);
         soft.burst(P.impChip, Math.round(8 * s), px, py, pz, n.x, n.y, n.z, s * far, t, 0, 1);
       }
+    }
+    if (e.by !== player && e.by && dist < 4 && player.alive) { // an enemy round landing right beside you: grit in the face
+      const k = 1 - dist / 4; nearMisses++;
+      v1.copy(camera.position).sub(p).normalize();
+      soft.burst(P.nearDust, 3, px, py, pz, n.x * 0.6 + v1.x * 0.5, n.y * 0.6 + v1.y * 0.5 + 0.2, n.z * 0.6 + v1.z * 0.5, 1, surfaceTint(c), -1e4, 1);
+      screen.suppress(0.6 * k);
     }
     if (c && e.normal) {
       const half = (metal ? 0.085 : 0.115) * (0.8 + 0.4 * Math.random()) * Math.sqrt(s);
@@ -431,25 +451,29 @@ export function init(ctx) {
   events.on('botDied', (e) => {
     const b = e.bot, p = e.point || (b && b.pos && v1.copy(b.pos).setY(b.pos.y + (b.height || 1.8) * 0.55));
     if (!p) return;
+    const rec = e.by && lastShot.get(e.by), fresh = rec && ctx.time - rec.t < 0.1;
     if (e.headshot) {
-      // headshot kill: big orange pop at the head, a slow shock ring, a shower of shards and a light pulse
+      // headshot kill: the same compact orange pop as a headshot, one quick ring and a handful of visor shards
       const hy = b && b.pos ? b.pos.y + (b.height || 1.8) * 0.92 : p.y + 0.65, hx = b && b.pos ? b.pos.x : p.x, hz = b && b.pos ? b.pos.z : p.z;
-      const ds = Math.min(6, Math.max(1.2, Math.hypot(hx - camera.position.x, hy - camera.position.y, hz - camera.position.z) * 0.17));
-      glow.burst(P.hsStar, 2, hx, hy, hz, 0, 1, 0, 3.4 * ds);
-      glow.burst(P.hsCore, 1, hx, hy, hz, 0, 1, 0, 1.6 * ds);
-      glow.burst(P.hsRing, 1, hx, hy, hz, 0, 1, 0, 1.3 * ds);
-      glow.burst(P.hsRingSlow, 1, hx, hy, hz, 0, 1, 0, ds);
-      glow.burst(P.hsShard, 30, hx, hy, hz, 0, 1, 0, 0.7 + ds * 0.5, null, -1e4, 0.7 + ds * 0.5);
-      glow.burst(P.hsSpark, 22, hx, hy, hz, 0, 1, 0, 0.7 + ds * 0.45, null, -1e4, 0.7 + ds * 0.5);
-      setLight(hx, hy, hz); soft.burst(P.enPuff, 4, p.x, p.y, p.z, 0, 1, 0, 1); soft.tweak(4, 1.3, 0.9, 0.7, 1);
-      flashLight(hx, hy + 0.2, hz, 1, 0.45, 0.14, 520, 18, 0.35);
+      const ds = Math.min(3, Math.max(1, Math.hypot(hx - camera.position.x, hy - camera.position.y, hz - camera.position.z) * 0.09));
+      glow.burst(P.hsStar, 1, hx, hy, hz, 0, 1, 0, 1.1 * ds);
+      glow.burst(P.hsCore, 1, hx, hy, hz, 0, 1, 0, 0.7 * ds);
+      glow.burst(P.hsRing, 1, hx, hy, hz, 0, 1, 0, 0.6 * ds);
+      glow.burst(P.hsShard, 9, hx, hy, hz, 0, 1, 0, 0.5 + ds * 0.3, null, -1e4, 0.7 + ds * 0.3);
+      glow.burst(P.hsSpark, 9, hx, hy, hz, 0, 1, 0, 0.6 + ds * 0.3, null, -1e4, 0.7 + ds * 0.3);
+      if (fresh) glow.burst(P.hsSpark, 6, hx, hy, hz, rec.dx, rec.dy + 0.2, rec.dz, 0.6 + ds * 0.3, null, -1e4, 1.2); // carried on along the shot
+      setLight(hx, hy, hz); soft.burst(P.enPuff, 2, p.x, p.y, p.z, 0, 1, 0, 0.7); soft.tweak(2, 1.3, 0.9, 0.7, 1);
+      flashLight(hx, hy + 0.2, hz, 1, 0.45, 0.14, 150, 10, 0.2);
       return;
     }
-    glow.burst(P.enFlash, 1, p.x, p.y, p.z, 0, 1, 0, 2.6);
-    glow.burst(P.enRing, 2, p.x, p.y, p.z, 0, 1, 0, 2.4);
-    glow.burst(P.enShard, 34, p.x, p.y, p.z, 0, 1, 0, 1.5, null, -1e4, 1.5);
-    setLight(p.x, p.y, p.z); soft.burst(P.enPuff, 6, p.x, p.y, p.z, 0, 1, 0, 1);
-    flashLight(p.x, p.y, p.z, 0.3, 0.9, 1, 260, 14, 0.25);
+    // body kill: the core lets go - a short teal flash, one ring, sparks thrown the way the killing round was going
+    const ks = Math.min(2.2, Math.max(1, camDist(p) * 0.07));
+    glow.burst(P.enFlash, 1, p.x, p.y, p.z, 0, 1, 0, 1.3 * ks);
+    glow.burst(P.enRing, 1, p.x, p.y, p.z, 0, 1, 0, 1.2 * ks);
+    glow.burst(P.enShard, 12, p.x, p.y, p.z, 0, 1, 0, 1.1, null, -1e4, 1.2);
+    if (fresh) glow.burst(P.enSpray, 10, p.x, p.y, p.z, rec.dx, rec.dy + 0.2, rec.dz, 1.1, null, -1e4, 1.1);
+    setLight(p.x, p.y, p.z); soft.burst(P.enPuff, 3, p.x, p.y, p.z, 0, 1, 0, 0.8);
+    flashLight(p.x, p.y, p.z, 0.3, 0.9, 1, 110, 9, 0.18);
   });
   events.on('botSpawned', (e) => {
     const b = e.bot; if (!b || !b.pos) return;
@@ -495,7 +519,7 @@ export function init(ctx) {
   const lightCol = new THREE.Vector3(1.25, 1.14, 1.0);
   const api = {
     soft, glow, decals, tracers, screen, lights, weaponClass, flashLight,
-    stats() { return { soft: soft.spawned, glow: glow.spawned, decals: decals.countLive(), drawCalls: 5, lights: LIGHTS }; },
+    stats() { return { soft: soft.spawned, glow: glow.spawned, decals: decals.countLive(), drawCalls: 5, lights: LIGHTS, nearMisses, suppress: screen.state.sup }; },
     update(dt) {
       const t = ctx.time;
       soft.setTime(t); glow.setTime(t); decals.setTime(t); tracers.setTime(t);

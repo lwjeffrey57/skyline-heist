@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { SOUNDS, IR, prebuild, renderSound, gunKey, PROFILES } from './audio/synth.js';
+import { createAmbient } from './audio/ambient.js';
+import { nearMiss } from './fx/nearmiss.js';
 
 // Audio system. Purely reactive (ctx.events). All sounds are synthesised (see audio/synth.js) and
 // pre-rendered to buffers in the background at init, so playing one is a single BufferSource scheduled
@@ -9,6 +11,13 @@ import { SOUNDS, IR, prebuild, renderSound, gunKey, PROFILES } from './audio/syn
 //                                                                 +-> send -> convolver(urban IR) -> muffle
 //          2D voice: src -> tilt shelf -> gain -> stereo pan -> sfx (+ send)        (player's own gun, movement)
 //          UI voice: same as 2D but straight to master (hit / headshot / kill cut through, never muffled)
+//
+// The player's own shot is layered: recorded sample + sub punch (sub_*) + action (mech_*) + environment:
+// the convolved room when there is a roof overhead, or the city roll plus a delayed distant report (tail_out,
+// one of the mid-distance recordings, dulled) outdoors. The last third of a magazine rises slightly in pitch
+// and the action gets louder. Incoming fire: positional report (duller behind you / through walls), a snap +
+// fly-by for near misses, and a short high-cut of the world while rounds are passing your head.
+// Guards, drones, turrets, breathing and the heat-driven tension bed live in audio/ambient.js.
 
 // gain, max = concurrent voices of this type, gap = min seconds between triggers, ref = panner refDistance,
 // send = reverb amount, rate = random pitch spread, pr = priority (higher steals lower)
@@ -36,14 +45,14 @@ const D = {
   rl_bolt: { gain: 0.44, max: 2, gap: 0.05, send: 0.05, rate: 0.04, pr: 6 },
   switch: { gain: 0.4, max: 1, gap: 0.08, send: 0.03, rate: 0.05, pr: 5 },
   dry: { gain: 0.42, max: 1, gap: 0.06, send: 0.02, rate: 0.05, pr: 5 },
-  hit: { gain: 0.5, max: 3, gap: 0.02, send: 0, rate: 0.03, pr: 10 },
-  headshot: { gain: 0.9, max: 3, gap: 0.03, send: 0.05, rate: 0, pr: 10 },
-  headkill: { gain: 1.0, max: 2, gap: 0.05, send: 0.1, rate: 0, pr: 10 },
+  hit: { gain: 0.5, max: 4, gap: 0.02, send: 0, rate: 0, pr: 10 },          // pitch / level wander is applied by the caller
+  headshot: { gain: 0.8, max: 3, gap: 0.03, send: 0.05, rate: 0.012, pr: 10 },
+  headkill: { gain: 0.95, max: 2, gap: 0.05, send: 0.1, rate: 0, pr: 10 },
   blip: { gain: 0.5, max: 6, gap: 0.02, send: 0.08, rate: 0, pr: 9 },
   tick: { gain: 0.22, max: 4, gap: 0.03, send: 0, rate: 0, pr: 2 },
   casing: { gain: 0.16, max: 4, gap: 0.06, ref: 1.5, send: 0.2, rate: 0.12, pr: 1 },
   shell: { gain: 0.22, max: 2, gap: 0.08, ref: 1.5, send: 0.2, rate: 0.1, pr: 1 },
-  kill: { gain: 0.72, max: 2, gap: 0.05, send: 0, rate: 0.015, pr: 10 },
+  kill: { gain: 0.85, max: 2, gap: 0.05, send: 0, rate: 0.015, pr: 10 },
   step: { gain: 0.065, max: 2, gap: 0.3, send: 0.03, rate: 0.04, pr: 1 },
   jump: { gain: 0.26, max: 1, gap: 0.08, send: 0.05, rate: 0.08, pr: 2 },
   land: { gain: 0.5, max: 1, gap: 0.08, send: 0.08, rate: 0.08, pr: 3 },
@@ -58,7 +67,7 @@ const D = {
   respawn: { gain: 0.35, max: 1, gap: 0.3, send: 0.15, rate: 0, pr: 8 },
   tinnitus: { gain: 0.1, max: 1, gap: 1.5, send: 0, rate: 0.04, pr: 4 },
 };
-const UI = { hit: 1, headshot: 1, headkill: 1, kill: 1, blip: 1, tick: 1, hurt: 1, heart: 1, tinnitus: 1, death: 1, respawn: 1 };
+const UI = { hit: 1, headshot: 1, headkill: 1, kill: 1, blip: 1, tick: 1, hurt: 1, heart: 1, tinnitus: 1, death: 1, respawn: 1, breath: 1, pulse: 1, stinger: 1 };
 for (const g of ['gun_rifle', 'gun_shotgun', 'gun_heavy', 'gun_grenade', 'gun_bot']) for (const pr of ['B', 'C']) D[gunKey(g, pr)] = D[g];
 const AMB_OUT = 0.07, AMB_IN = 0.04, MUSIC_GAIN = 0.16; // music sits about 20 dB under the player's gunshots
 // recorded gunshots (profile 'R'): CC0 files in public/audio, see CREDITS.txt there
@@ -73,6 +82,28 @@ Object.assign(D, {
   sub_rifle: { gain: 0.8, max: 3, gap: 0.03, send: 0, rate: 0.03, pr: 8 },
   sub_shotgun: { gain: 0.9, max: 2, gap: 0.05, send: 0, rate: 0.03, pr: 8 },
 });
+Object.assign(D, {
+  // own-gun layers
+  sub_heavy: { gain: 1.0, max: 2, gap: 0.05, send: 0, rate: 0.02, pr: 8 },
+  mech_rifle: { gain: 0.2, max: 3, gap: 0.03, send: 0.03, rate: 0.04, pr: 5 },
+  mech_pistol: { gain: 0.2, max: 2, gap: 0.03, send: 0.03, rate: 0.04, pr: 5 },
+  tail_out: { gain: 0.17, max: 2, gap: 0.16, send: 0.5, rate: 0.05, pr: 4 },   // distant recordings, replayed late and dull
+  // incoming / world
+  flyby: { gain: 0.55, max: 2, gap: 0.08, ref: 2, send: 0.1, rate: 0.12, pr: 5 },
+  imp_body: { gain: 0.55, max: 4, gap: 0.025, ref: 4, send: 0.15, rate: 0.1, pr: 4 },
+  step_bot: { gain: 0.5, max: 4, gap: 0.1, ref: 2.2, send: 0.12, rate: 0.08, pr: 2 }, // the player's own step buffers, positional
+  vox_alert: { gain: 0.55, max: 2, gap: 0.2, ref: 6, send: 0.35, rate: 0.07, pr: 6 },
+  vox_sus: { gain: 0.45, max: 2, gap: 0.3, ref: 5, send: 0.3, rate: 0.07, pr: 5 },
+  vox_hurt: { gain: 0.5, max: 3, gap: 0.1, ref: 5, send: 0.25, rate: 0.1, pr: 5 },
+  tell: { gain: 0.5, max: 3, gap: 0.08, ref: 5, send: 0.15, rate: 0.05, pr: 6 },
+  servo: { gain: 0.35, max: 3, gap: 0.08, ref: 3, send: 0.1, rate: 0.06, pr: 2 },
+  // 2D / UI
+  breath: { gain: 0.2, max: 1, gap: 0.5, send: 0, rate: 0.05, pr: 4 },
+  pulse: { gain: 0.42, max: 2, gap: 0.15, send: 0, rate: 0, pr: 3 },
+  stinger: { gain: 0.6, max: 1, gap: 1, send: 0, rate: 0, pr: 9 },
+  drone_loop: { gain: 0, max: 0, gap: 9, send: 0, rate: 0, pr: 0 }, tension: { gain: 0, max: 0, gap: 9, send: 0, rate: 0, pr: 0 }, // loops (ambient.js owns their nodes)
+});
+const ALIAS = { tail_out: 'rec_bot', step_bot: 'step' }; // voices that reuse another sound's buffers
 const N3D = 24, N2D = 16;
 const REV_OUT = 0.9, REV_IN = 3.6; // wet levels: open city / under a roof (calibrated numerically, see final report)
 
@@ -94,6 +125,8 @@ export function init(ctx) {
   const state = {};     // name -> { last: time of last trigger, v: last variant, live: count }
   for (const k in SOUNDS) { buffers[k] = []; state[k] = { last: -1, v: 0, live: 0, rep: 0 }; }
   for (const k in REC) { buffers[k] = []; state[k] = { last: -1, v: 0, live: 0, rep: 0 }; }
+  for (const k in ALIAS) { buffers[k] = buffers[ALIAS[k]]; state[k] = { last: -1, v: 0, live: 0, rep: 0 }; }
+  const trig = {}; // name -> times started (tests)
   const recStatus = {};
   let ac = null, G = null, volume = 0.55, muted = false, played = 0, dropped = 0;
   let profile = 'R', musicOn = false, musicVol = 1; // music is off unless the player turns it on with M
@@ -108,7 +141,7 @@ export function init(ctx) {
       prebuild(); // noise + impulse responses, synchronously, so nothing is generated on the first shot
       const jobs = [];
       // gunplay loop first, secondary sounds after
-      const order = ['gun_rifle', 'hit', 'headshot', 'headkill', 'kill', 'imp_concrete', 'imp_metal', 'gun_shotgun', 'gun_heavy', 'gun_grenade', 'gun_bot', 'imp_energy', 'dry', 'rl_out', 'rl_in', 'rl_bolt', 'switch'];
+      const order = ['gun_rifle', 'hit', 'headshot', 'headkill', 'kill', 'sub_rifle', 'mech_rifle', 'mech_pistol', 'imp_body', 'imp_concrete', 'imp_metal', 'gun_shotgun', 'gun_heavy', 'gun_grenade', 'gun_bot', 'imp_energy', 'dry', 'rl_out', 'rl_in', 'rl_bolt', 'switch'];
       for (const k in SOUNDS) if (!order.includes(k)) order.push(k);
       order.splice(order.indexOf('music'), 1); order.push('music');
       for (const k of order) if (!SOUNDS[k].gun || SOUNDS[k].gun === synthProf()) for (let v = 0; v < SOUNDS[k].n; v++) jobs.push([k, v]);
@@ -196,12 +229,12 @@ export function init(ctx) {
     }
     if (v.busy && v.src) { v.src.onended = null; try { v.src.stop(); } catch (e) { /* not started */ } state[v.name].live--; }
     st.last = now; st.live++;
-    v.busy = true; v.name = name; v.t = now; v.pr = d.pr;
+    v.busy = true; v.name = name; v.t = now; v.pr = d.pr; trig[name] = (trig[name] || 0) + 1;
     return v;
   }
   function source(v, name, d, when, rateMul) {
     const list = buffers[name], st = state[name], n = list.length;
-    if (REC[name]) { // recordings: random, but never the same take more than twice running
+    if (REC[name] || name === 'tail_out') { // recordings: random, but never the same take more than twice running
       let pick = Math.floor(Math.random() * n);
       if (pick === st.v && st.rep >= 2) pick = (pick + 1 + Math.floor(Math.random() * (n - 1))) % n;
       st.rep = pick === st.v ? st.rep + 1 : 1; st.v = pick;
@@ -213,7 +246,7 @@ export function init(ctx) {
     played++;
     return src;
   }
-  const complete = (name) => { const b = buffers[name], n = REC[name] ? REC[name].length : SOUNDS[name].n; if (!b || b.length !== n) return false; for (let i = 0; i < n; i++) if (!b[i]) return false; return true; };
+  const complete = (name) => { if (ALIAS[name]) name = ALIAS[name]; const b = buffers[name], n = REC[name] ? REC[name].length : SOUNDS[name].n; if (!b || b.length !== n) return false; for (let i = 0; i < n; i++) if (!b[i]) return false; return true; };
   const usable = (name) => G && ac.state === 'running' && complete(name);
   // which buffer set a weapon class plays right now
   const gunName = (base) => { if (profile === 'R') { const r = REC_FOR[base]; if (r && complete(r)) return r; } return gunKey(base, synthProf()); };
@@ -226,11 +259,15 @@ export function init(ctx) {
     const cp = camera.position, dist = Math.hypot(x - cp.x, y - cp.y, z - cp.z);
     const src = source(v, name, d, now, rateMul);
     v.g.gain.value = d.gain * vol * (0.92 + Math.random() * 0.16) * (occluded ? 0.6 : 1);
-    v.lp.frequency.value = (600 + 19000 / (1 + (dist / 28) * (dist / 28))) * (occluded ? 0.3 : 1);
+    // front / back: equal-power panning cannot say "behind you", so sources behind the listener are a little duller
+    let rear = 0;
+    if (dist > 1.5) { fwd.set(0, 0, -1).applyQuaternion(camera.quaternion); rear = Math.max(0, -((x - cp.x) * fwd.x + (y - cp.y) * fwd.y + (z - cp.z) * fwd.z) / dist); }
+    v.lp.frequency.value = (600 + 19000 / (1 + (dist / 28) * (dist / 28))) * (occluded ? 0.3 : 1) * (1 - 0.5 * rear);
     v.pan.refDistance = d.ref;
     if (v.pan.positionX) { v.pan.positionX.value = x; v.pan.positionY.value = y; v.pan.positionZ.value = z; } else v.pan.setPosition(x, y, z);
     v.send.gain.value = d.send * (0.7 + Math.min(1.6, dist / 30));
     src.connect(v.g); src.start(now + delay);
+    return v;
   }
   // non-positional one-shot (the player's own actions). tilt = random high-shelf dB spread for timbre variety
   function play2(name, vol = 1, pan = 0, tilt = 0, rateMul = 1, delay = 0, sendMul = 1) {
@@ -262,11 +299,31 @@ export function init(ctx) {
   }
 
   // ---- events --------------------------------------------------------------------------------------------
-  const va = new THREE.Vector3(), vb = new THREE.Vector3();
+  const va = new THREE.Vector3(), vb = new THREE.Vector3(), fwd = new THREE.Vector3();
   const camDist = (p) => p.distanceTo(camera.position);
   const isMetal = (c) => !!c && (c.tag === 'container' || c.mat === world.materials.metal || (c.mat && c.mat.metalness > 0.5));
 
   let lastOwn = -9, streak = 0, ownV = null, ownSrc = null;
+  // last rounds: 0 until the magazine is down to its last third, then up to 1 on the final round.
+  // Uses lowAmmo { weapon, frac } when the weapons system sends it, otherwise reads the magazine itself.
+  let laFrac = 1, laT = -9;
+  events.on('lowAmmo', (e) => { if (typeof e.frac === 'number') { laFrac = e.frac; laT = ctx.time; } });
+  function lastRounds() {
+    let f = 1;
+    const w = ctx.weapons && ctx.weapons.current;
+    if (w && w.def && w.def.mag >= 8 && typeof w.mag === 'number') f = w.mag / w.def.mag;
+    if (ctx.time - laT < 0.08) f = Math.min(f, laFrac);
+    return f < 0.34 ? Math.min(1, 1 - f / 0.34) : 0;
+  }
+  // incoming fire heard through a wall: one line-of-sight test per shooter every 0.4 s, not per shot
+  const occl = new WeakMap();
+  function occluded(by, m) {
+    if (!by || typeof by !== 'object') return false;
+    let o = occl.get(by); if (!o) { o = { t: -9, v: false }; occl.set(by, o); }
+    if (ctx.time - o.t > 0.4) { o.t = ctx.time; vb.copy(camera.position); o.v = !world.lineOfSight(va.copy(m), vb); }
+    return o.v;
+  }
+  let supT = -9;
   const REC_PF = { send: 1, roll: 1 };
   events.on('shot', (e) => {
     const name = gunFor(e.weapon);
@@ -279,9 +336,20 @@ export function init(ctx) {
       const key = isPistol && profile === 'R' && complete('rec_pistol') ? 'rec_pistol' : gunName(name), rec = !!REC[key], PF = rec ? REC_PF : PROFILES[synthProf()], auto = name === 'gun_rifle' && !isPistol;
       // sustained fire: fade the previous round's long recorded buffer ~250 ms after it started, so voices never pile up
       if (rapid && ownV && ownV.busy && ownV.src === ownSrc) { ownV.g.gain.setTargetAtTime(0, now + 0.15, 0.03); try { ownSrc.stop(now + 0.32); } catch (err) { /* already stopped */ } }
-      ownV = play2(key, quiet * (rapid ? 0.97 - Math.min(0.08, streak * 0.01) : 1.05) * (rec ? Math.pow(10, (Math.random() - 0.5) * 0.1) : 1), 0.06, rec ? 1 : 2 + Math.min(1, streak * 0.15), 1 + (!rec && streak > 3 ? (Math.random() - 0.5) * 0.03 : 0), 0, PF.send * (rapid ? 0.7 : 1));
+      const la = lastRounds();
+      ownV = play2(key, quiet * (rapid ? 0.97 - Math.min(0.08, streak * 0.01) : 1.05) * (rec ? Math.pow(10, (Math.random() - 0.5) * 0.1) : 1), 0.06, rec ? 1 : 2 + Math.min(1, streak * 0.15), (1 + (!rec && streak > 3 ? (Math.random() - 0.5) * 0.03 : 0)) * (1 + la * 0.05), 0, PF.send * (rapid ? 0.7 : 1));
       ownSrc = ownV ? ownV.src : null;
-      if (e.suppressed) { /* no sub layer */ } else if (rec && key === 'rec_pistol') play2('sub_rifle', 0.55); else if (rec && key === 'rec_rifle') play2('sub_rifle', rapid ? 0.9 : 1); else if (rec && key === 'rec_shotgun') play2('sub_shotgun'); // low-end the close-mic recordings lack
+      if (e.suppressed) { /* no sub layer */ } else if (rec && key === 'rec_pistol') play2('sub_rifle', 0.55); else if (rec && key === 'rec_rifle') play2('sub_rifle', rapid ? 0.9 : 1); else if (rec && key === 'rec_shotgun') play2('sub_shotgun'); else if (rec && key === 'rec_heavy') play2('sub_heavy'); // low-end the close-mic recordings lack
+      // the action cycling, a few ms behind the blast; louder and higher as the magazine runs dry
+      if (!rec) { /* the synthesised voicings (F4: A/B/C) already contain their action */ } else if (isPistol) play2('mech_pistol', (e.suppressed ? 1.5 : 1) * (1 + la * 1.4), 0.1, 1.5, 1 + la * 0.1, 0.01);
+      else if (auto) play2('mech_rifle', (e.suppressed ? 1.5 : rapid ? 0.85 : 1) * (1 + la * 1.4), 0.1, 1.5, 1 + la * 0.1, 0.012);
+      // outdoors the shot comes back off the far buildings: a real distant report, late, dull and off to one side.
+      // Under a roof there is none - the room response (revIn) is the tail.
+      if (indoor !== 1 && !e.suppressed && name !== 'gun_grenade' && complete('tail_out')) {
+        const big = name === 'gun_heavy' ? 1.5 : name === 'gun_shotgun' ? 1.25 : isPistol ? 0.7 : 1;
+        const tv = play2('tail_out', big * (rapid ? 0.6 : 1), (Math.random() < 0.5 ? -1 : 1) * (0.25 + Math.random() * 0.5), 0, 0.76 + Math.random() * 0.1, 0.15 + Math.random() * 0.09, 1);
+        if (tv) tv.sh.gain.value = -15;
+      }
       if (G && ac.state === 'running') {
         // cut the previous round's tail, hold it down while the trigger is held; the roll returns after the last shot
         const tg = G.tail.gain, md = G.musicDuck.gain;
@@ -296,23 +364,31 @@ export function init(ctx) {
     }
     const m = e.muzzle || e.origin; if (!m) return;
     const dist = camDist(m);
-    play3(gunName(name), m.x, m.y, m.z, 1, Math.min(0.3, dist / 343));
-    // near miss: the round passes close to the listener's head
-    const o = e.origin || m, d = e.dir; if (!d) return;
-    const cp = camera.position, t = (cp.x - o.x) * d.x + (cp.y - o.y) * d.y + (cp.z - o.z) * d.z;
-    if (t > 4) {
-      va.copy(o).addScaledVector(d, t);
-      const miss = va.distanceTo(cp);
-      if (miss < 3.2 && miss > 0.25 && ac && ac.currentTime - state.whiz.last > D.whiz.gap && !world.raycast(o, d, t)) play3('whiz', va.x, va.y, va.z, 1.1 - miss * 0.2, 0, 1);
+    play3(gunName(name), m.x, m.y, m.z, 1, Math.min(0.3, dist / 343), 1, dist > 8 && occluded(e.by, m));
+    // near miss: the round passes close to the listener's head. The snap arrives first (it travels with the
+    // bullet), at the point of closest approach, so it pans to the side the round went by; then the fly-by hiss.
+    const miss = nearMiss(e, camera.position, world, va);
+    if (miss >= 0 && miss < 3.2 && ac) {
+      const k = 1 - miss / 3.2;
+      play3('whiz', va.x, va.y, va.z, 0.5 + 0.7 * k, 0, 1);
+      if (miss < 2.2) play3('flyby', va.x, va.y, va.z, 0.5 + 0.6 * k, 0.012, 1.1 - k * 0.2);
+      // suppression: rounds cracking past take the top off the world for a moment (never stacks into a mute)
+      if (G && ac.state === 'running' && ac.currentTime - supT > 0.12) {
+        supT = ac.currentTime;
+        const p = G.muffle.frequency;
+        if (p.value > 5000) { p.cancelScheduledValues(supT); p.setValueAtTime(Math.min(p.value, 9000 - 4500 * k), supT); p.exponentialRampToValueAtTime(20000, supT + 0.5 + 0.4 * k); }
+      }
     }
   });
   events.on('impact', (e) => {
     const p = e.point; if (!p) return;
     const dist = camDist(p); if (dist > 90) return;
     const delay = dist > 25 ? Math.min(0.25, dist / 343) : 0, big = e.damage > 60 ? 1.35 : 1;
-    if (e.kind === 'flesh') { if (e.target !== player) play3('imp_energy', p.x, p.y, p.z, big, delay); return; }
+    if (e.kind === 'flesh') { if (e.target !== player) play3(e.headshot ? 'imp_metal' : 'imp_body', p.x, p.y, p.z, big * (e.headshot ? 0.7 : 1), delay, e.headshot ? 1.5 : 1); return; }
     const metal = isMetal(e.collider);
-    play3(metal ? 'imp_metal' : 'imp_concrete', p.x, p.y, p.z, big, delay, big > 1 ? 0.8 : 1);
+    // enemy rounds landing right beside the player are louder than physics says: they are the ones that matter
+    const close = e.by !== player && dist < 4 ? 1.6 : 1;
+    play3(metal ? 'imp_metal' : 'imp_concrete', p.x, p.y, p.z, big * close, delay, big > 1 ? 0.8 : 1);
     if (Math.random() < (metal ? 0.4 : 0.14)) play3('ricochet', p.x, p.y, p.z, 1, delay + 0.01);
   });
   events.on('explosion', (e) => {
@@ -330,15 +406,35 @@ export function init(ctx) {
     for (const v of G.v2) if (v.busy && v.name === name && v.src) { v.src.onended = null; try { v.src.stop(); } catch (err) { /* */ } v.src = null; v.busy = false; state[name].live--; }
     state[name].last = -1;
   }
+  // Reload cues. Two sources can drive them: the old `reload { time }` (cues scheduled by fraction of the reload)
+  // and, when the weapons system sends them, `reloadStage { stage:'out'|'in'|'charge' }` at the animation's real
+  // moments. As soon as a stage event has been seen, stages own the timing and nothing is scheduled ahead; each
+  // cue also has a minimum spacing so the same moment reported by two events never plays twice.
+  let stagesSeen = false;
+  const cueT = { rl_out: -9, rl_in: -9, rl_bolt: -9 }, CUE_GAP = { rl_out: 0.3, rl_in: 0.09, rl_bolt: 0.3 };
+  function reloadCue(name, vol = 1, pan = 0, rate = 1) {
+    if (!ac || ac.currentTime - cueT[name] < CUE_GAP[name]) return;
+    cueT[name] = ac.currentTime; state[name].last = -1;
+    play2(name, vol, pan, 0, rate);
+  }
   events.on('reload', (e) => {
     const t = e.time > 0.2 ? e.time : 1.2;
-    play2('rl_out');
-    if (gunFor(e.weapon) === 'gun_shotgun') return;     // shells arrive one by one via shellInsert / reloadDone
+    const sg = gunFor(e.weapon) === 'gun_shotgun';
+    if (sg || !stagesSeen) reloadCue('rl_out');        // with stage events the 'out' stage plays this at the animation's moment
+    if (stagesSeen || sg) return;                      // shells arrive one by one via shellInsert / reloadDone
     play2('rl_in', 1, 0, 0, 1, t * 0.52);
     state.rl_bolt.last = -1; play2('rl_bolt', 1, 0, 0, 1, Math.max(t * 0.52 + 0.15, t * 0.86 - 0.1));
   });
-  events.on('shellInsert', () => play2('rl_in', 0.9, 0, 0, 1.12));
-  events.on('reloadDone', (e) => { if (gunFor(e.weapon) === 'gun_shotgun') play2('rl_bolt', 0.8, 0.1, 0, 0.82); });
+  events.on('reloadStage', (e) => {
+    const first = !stagesSeen;
+    if (first) { stagesSeen = true; cancel('rl_in'); cancel('rl_bolt'); } // drop whatever `reload` scheduled ahead
+    const sg = gunFor(e.weapon) === 'gun_shotgun';
+    if (e.stage === 'out') { if (!first) reloadCue('rl_out'); }       // (the very first one was already played by `reload`)
+    else if (e.stage === 'in') reloadCue('rl_in', sg ? 0.9 : 1, 0, sg ? 1.12 : 1);
+    else if (e.stage === 'charge') reloadCue('rl_bolt', sg ? 0.8 : 1, sg ? 0.1 : 0, sg ? 0.82 : 1);
+  });
+  events.on('shellInsert', () => reloadCue('rl_in', 0.9, 0, 1.12));
+  events.on('reloadDone', (e) => { if (gunFor(e.weapon) === 'gun_shotgun') reloadCue('rl_bolt', 0.8, 0.1, 0.82); });
   events.on('ejectCasing', (e) => {
     const p = e.position || e.pos || player.pos, sg = gunFor(e.weapon) === 'gun_shotgun';
     // it lands near the feet a moment later
@@ -348,7 +444,7 @@ export function init(ctx) {
   events.on('grenadeThrow', () => play2('jump', 1, 0.1, 0, 1.25));
   events.on('grenadeBounce', (e) => { const p = e.point; if (p) play3('crack', p.x, p.y, p.z, Math.min(1, 0.3 + (e.speed || 4) / 14), 0, 1.5); });
   events.on('weaponSwitch', () => { cancel('rl_in'); cancel('rl_bolt'); play2('switch'); });
-  events.on('dryFire', () => play2('dry'));
+  events.on('dryFire', () => play2('dry')); // (gap 60 ms: a held trigger cannot machine-gun it)
   // One kill = one confirmation, whichever of hitmarker{kill} / killConfirm arrives first (they come in the
   // same frame); the later one only adds what the first could not know (multi-kill notes).
   let killT = -9, killMulti = 0, scoreT = -9;
@@ -360,7 +456,7 @@ export function init(ctx) {
       killT = now; killMulti = 1;
       const up = Math.pow(2, (Math.min(multi - 1, 5) * 2 + Math.min(streak, 8) * 0.25) / 12);
       if (headshot) { play2('headkill'); duckWorld(0.45, 0.25); } // the signature itself is never re-pitched
-      else { play2('kill', 1, 0, 0, up); duckWorld(0.62, 0.15); }
+      else { play2('kill', 1, 0, 0, Math.min(1.12, up)); state.hit.last = -1; play2('hit', 0.55, 0, 0, 0.94); duckWorld(0.62, 0.15); } // thump + the tick of the round that did it
     }
     // double / triple / ...: that many extra notes, each higher, louder with the count
     for (let i = killMulti; i < Math.min(multi, 7); i++) play2('blip', 0.7 + i * 0.08, 0, 0, Math.pow(2, SCALE[i] / 12), 0.13 + (i - 1) * 0.075);
@@ -374,10 +470,17 @@ export function init(ctx) {
     const n = Math.max(1, Math.min(6, Math.round(pts / 60))), base = 1 + Math.min(0.5, (e.multi > 1 ? e.multi - 1 : 0) * 0.08);
     for (let i = 0; i < n; i++) { state.tick.last = -1; play2('tick', 0.8, 0, 0, base * (1 + i * 0.06), 0.22 + i * 0.045); }
   });
+  // Hits: body = tick; headshot = crack over a quieter tick. Within a burst the tick creeps up in pitch and
+  // wanders by about a semitone and a decibel, and heavier rounds land a little louder.
+  let hitT = -9, hitRun = 0;
   events.on('hitmarker', (e) => {
-    if (e.kill) killCue(!!e.headshot, 1, 0);
-    else if (e.headshot) { play2('headshot'); duckWorld(0.55, 0.1); }
-    else play2('hit');
+    if (e.kill) { killCue(!!e.headshot, 1, 0); return; }
+    if (!ac) return;
+    const now = ac.currentTime; hitRun = now - hitT < 0.3 ? Math.min(hitRun + 1, 6) : 0; hitT = now;
+    const lvl = Math.min(1.15, 0.8 + (e.damage > 0 ? e.damage : 25) / 120) * (1 - hitRun * 0.025) * Math.pow(10, (Math.random() - 0.5) * 0.1);
+    const rate = Math.pow(2, ((Math.random() - 0.5) * 1.6 + hitRun * 0.3) / 12);
+    if (e.headshot) { play2('headshot', 1, 0, 0, Math.pow(2, (Math.random() - 0.5) * 0.5 / 12)); play2('hit', lvl * 0.55, 0, 2, rate); duckWorld(0.6, 0.08); }
+    else play2('hit', lvl, 0, 2.5, rate);
   });
   events.on('pieceDamaged', (e) => { const p = e.point; if (p && camDist(p) < 70) play3('crack', p.x, p.y, p.z); });
   events.on('pieceDestroyed', (e) => {
@@ -464,10 +567,10 @@ export function init(ctx) {
     // for tests / tooling
     debug: {
       ready, buffers, defs: D, sounds: SOUNDS, gunFor, start, recStatus, gunName, REC,
-      get recReady() { return recReady; }, reloadRecs(map) { for (const k in map) buffers[k] = []; return loadRecs(map); },
+      get recReady() { return recReady; }, reloadRecs(map) { for (const k in map) buffers[k] = []; for (const k in ALIAS) buffers[k] = buffers[ALIAS[k]]; return loadRecs(map); },
       get context() { return ac; },
       get graph() { return G; },
-      get indoor() { return indoor; },
+      get indoor() { return indoor; }, trig, get ambient() { return ambient.stats; }, lastRounds,
       counts() { let b3 = 0, b2 = 0; if (G) { for (const v of G.v3) if (v.busy) b3++; for (const v of G.v2) if (v.busy) b2++; } return { played, dropped, busy3d: b3, busy2d: b2, state: ac ? ac.state : 'none', latency: ac ? ac.baseLatency : null }; },
       stats() { const o = {}; for (const k in buffers) o[k] = buffers[k].map((b) => b && b._stats); return o; },
     },
@@ -476,6 +579,7 @@ export function init(ctx) {
   // ---- per-frame: listener, ambience, heartbeat ----------------------------------------------------------
   const fw = new THREE.Vector3(), up = new THREE.Vector3();
   let beatT = 0, lowHp = false, roofT = 0, indoor = -1;
+  const ambient = createAmbient(ctx, { play2, play3, usable, buffers, camera, graph: () => G, ac: () => ac });
   const UPV = new THREE.Vector3(0, 1, 0);
   return {
     update(dt) {
@@ -514,6 +618,7 @@ export function init(ctx) {
         if (beatT <= 0) { const k = 1 - player.hp / (player.maxHp * 0.35); beatT = 0.95 - k * 0.38; play2('heart', 0.6 + k * 0.5); }
       } else beatT = 0;
       if (low !== lowHp) { lowHp = low; G.sfx.gain.setTargetAtTime(low ? 0.8 : 1, ac.currentTime, 0.3); }
+      ambient.update(dt);
     },
   };
 }

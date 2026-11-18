@@ -183,3 +183,12 @@ export function subPunch(name, R) {
   for (let i = 0; i < o.length; i++) o[i] = b.run(a.run(o[i]));
   return o;
 }
+
+// action layer under the player's recorded shots: the carrier / slide going back and slamming home.
+// It is what makes a close gun sound like a machine and not only a bang.
+export function mechSound(kind, R) {
+  const o = new Float32Array(Math.floor(0.22 * GSR));
+  if (kind === 'pistol') { clank(o, R, 0.003, 0.9, METAL.home); clank(o, R, 0.036, 1.0, METAL.carrier); }
+  else { clank(o, R, 0.004, 1.0, METAL.carrier); clank(o, R, 0.032, 0.9, METAL.home); clank(o, R, 0.008, 0.3, METAL.spring, 0.004); }
+  return o;
+}

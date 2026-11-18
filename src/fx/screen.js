@@ -1,10 +1,12 @@
 // Screen-space feedback: camera shake / weapon kick (applied as an offset AFTER player.update rewrote the
 // camera), damage vignette + direction arc, low-health pulse, explosion flash / blur, death fade.
+// Suppression (rounds cracking past / landing beside you): the edges of the view darken and close in briefly.
 // All DOM lives under ctx.hud with ids prefixed `fx-`; styles are only touched when a value changes.
 
 export function createScreen(ctx) {
   const mk = (id, css) => { const d = document.createElement('div'); d.id = id; d.style.cssText = 'position:fixed;inset:0;pointer-events:none;opacity:0;' + css; ctx.hud.appendChild(d); return d; };
   const elVig = mk('fx-vignette', 'background:radial-gradient(ellipse at center, rgba(120,0,0,0) 38%, rgba(150,8,4,.5) 72%, rgba(120,0,0,.92) 100%);');
+  const elSup = mk('fx-suppress', 'background:radial-gradient(ellipse at center, rgba(0,0,0,0) 46%, rgba(6,8,12,.5) 80%, rgba(0,0,0,.9) 100%);');
   const elFlash = mk('fx-flash', 'background:radial-gradient(ellipse at center, rgba(255,246,225,.95) 0%, rgba(255,214,150,.85) 55%, rgba(255,170,90,.7) 100%);mix-blend-mode:screen;');
   const elBlur = mk('fx-blur', 'opacity:1;display:none;');
   const elFade = mk('fx-fade', 'background:radial-gradient(ellipse at center, rgba(30,4,4,.82) 0%, rgba(6,0,0,.97) 100%);');
@@ -15,7 +17,7 @@ export function createScreen(ctx) {
 
   const S = {
     trauma: 0, kp: 0, kpv: 0, ky: 0, kyv: 0, kr: 0, krv: 0, t: 0,
-    hurt: 0, flash: 0, blur: 0, fade: 0, dirA: 0, dirX: 0, dirZ: 0,
+    hurt: 0, flash: 0, blur: 0, fade: 0, dirA: 0, dirX: 0, dirZ: 0, sup: 0, oSup: -1,
     oVig: -1, oFlash: -1, oBlur: -1, oFade: -1, oDir: -1, oDirRot: 1e9,
   };
   const q = (v) => Math.round(Math.min(1, Math.max(0, v)) * 50) / 50;
@@ -31,10 +33,16 @@ export function createScreen(ctx) {
       api.kick((Math.random() - 0.5) * 0.012, (Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.03);
       api.addTrauma(0.12 + amount / 160, 0.5);
     },
+    // k 0..1: how close the round was. Builds with sustained fire, capped well short of blacking the edges out.
+    suppress(k) {
+      S.sup = Math.min(0.8, S.sup + 0.2 + 0.3 * k);
+      api.addTrauma(0.03 + 0.05 * k, 0.22);
+      api.kick((Math.random() - 0.5) * 0.004 * k, (Math.random() - 0.5) * 0.006 * k, (Math.random() - 0.5) * 0.008 * k);
+    },
     flash(a) { S.flash = Math.max(S.flash, a); },
     blur(a) { S.blur = Math.max(S.blur, a); },
     died() { S.fade = 1; S.hurt = 1; },
-    respawned() { S.hurt = 0; S.dirA = 0; S.trauma = 0; },
+    respawned() { S.hurt = 0; S.dirA = 0; S.trauma = 0; S.sup = 0; },
     update(dt) {
       const cam = ctx.camera, p = ctx.player;
       S.t += dt;
@@ -65,6 +73,9 @@ export function createScreen(ctx) {
       }
       const v = q(vig);
       if (v !== S.oVig) { S.oVig = v; elVig.style.opacity = v; }
+      S.sup = Math.max(0, S.sup - dt * (0.9 + S.sup * 1.6)); // ~0.6 s from a single near miss
+      const su = q(S.sup);
+      if (su !== S.oSup) { S.oSup = su; elSup.style.opacity = su; }
       S.flash = Math.max(0, S.flash - dt * (1.6 + S.flash * 3));
       const f = q(S.flash);
       if (f !== S.oFlash) { S.oFlash = f; elFlash.style.opacity = f; }

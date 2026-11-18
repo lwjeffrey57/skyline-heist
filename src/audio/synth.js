@@ -4,7 +4,7 @@
 // At runtime the engine only plays buffers, so a gunshot costs one BufferSource and starts on its first
 // sample (all transients sit at t = 0 with no attack ramp). Nothing here imitates an existing game.
 
-import { gunSound, snapRaw, irOutdoor, irRoom, PROFILES, subPunch } from './guns.js';
+import { gunSound, snapRaw, irOutdoor, irRoom, PROFILES, subPunch, mechSound } from './guns.js';
 export { PROFILES };
 
 export const SR = 44100;
@@ -192,18 +192,23 @@ export const SOUNDS = {
   rl_bolt: { d: 0.3, n: 2, f: (ac, o, R) => { nz(ac, o, R, 0, { type: 'highpass', f0: 2500, d: 0.012, g: 0.8 }); tn(ac, o, 0, { f0: 230, f1: 170, d: 0.03, g: 0.5 }); nz(ac, o, R, 0.015, { f0: 1100, f1: 1900, a: 0.01, d: 0.05, g: 0.4, q: 2 }); const t = j(R, 0.085, 0.1); nz(ac, o, R, t, { type: 'highpass', f0: 2200, d: 0.014, g: 1 }); tn(ac, o, t, { f0: j(R, 2400, 0.05), d: 0.07, g: 0.12 }); tn(ac, o, t, { f0: 210, f1: 150, d: 0.04, g: 0.8 }); } },
   switch: { d: 0.34, n: 1, f: (ac, o, R) => { nz(ac, o, R, 0, { f0: 600, f1: 1900, a: 0.05, d: 0.09, g: 0.45, q: 0.9 }); nz(ac, o, R, 0.15, { type: 'highpass', f0: 2800, d: 0.01, g: 0.8 }); tn(ac, o, 0.15, { f0: 240, f1: 170, d: 0.035, g: 0.6 }); tn(ac, o, 0.15, { type: 'square', f0: 1700, d: 0.012, g: 0.12 }); } },
   dry: { d: 0.12, n: 1, f: (ac, o, R) => { nz(ac, o, R, 0, { type: 'highpass', f0: 3000, d: 0.005, g: 0.9 }); tn(ac, o, 0, { type: 'square', f0: 2100, d: 0.012, g: 0.2 }); tn(ac, o, 0, { f0: 320, f1: 260, d: 0.02, g: 0.5 }); } },
-  hit: { d: 0.11, n: 1, f: (ac, o, R) => { nz(ac, o, R, 0, { type: 'highpass', f0: 5000, d: 0.005, g: 0.8 }); tn(ac, o, 0, { type: 'triangle', f0: 1900, d: 0.04, g: 0.9 }); tn(ac, o, 0, { f0: 2850, d: 0.03, g: 0.45 }); tn(ac, o, 0, { f0: 420, f1: 300, d: 0.02, g: 0.4 }); } },
-  // HEADSHOT SIGNATURE: one fixed sound, never varied - a hard tick, a 20 ms grace note and a leap up a fifth
-  // to a glassy bell (E7 -> B7). Nothing else in the mix has this contour.
-  headshot: { d: 0.45, n: 1, f: (ac, o, R) => hsSig(ac, o, R, 1) },
-  // HEADSHOT KILL: the same signature (so it is recognised at once), on top of a dark thud, answered by the
-  // octave above and a falling shimmer
-  headkill: { d: 1.2, n: 1, f: (ac, o, R) => {
-    hsSig(ac, o, R, 1);
-    nz(ac, o, R, 0, { kind: 'brown', type: 'lowpass', f0: 140, d: 0.3, g: 2.2, q: 0.6 }); nz(ac, o, R, 0, { f0: 80, q: 1.5, d: 0.2, g: 2.0 });
-    bell(ac, o, 0.115, 7902.1, 0.5, 0.3, [1, 1.5]); bell(ac, o, 0.115, 1975.5, 0.7, 0.28, [1, 2.01, 3]);
-    [5919.9, 5274, 4698.6, 3951.1].forEach((hz, i) => tn(ac, o, 0.2 + i * 0.055, { f0: hz, a: 0.004, d: 0.3, g: 0.11 }));
-    nz(ac, o, R, 0.1, { f0: 11000, q: 2, a: 0.03, d: 0.6, g: 0.25 });
+  // ---- hit confirmation. Four clearly different sounds, shortest and driest for the commonest event --------
+  // body hit: a tight dry tick (click + a damped knock + a small low "thup"). 4 variants; the engine also
+  // wanders pitch and level so a burst of hits never sounds like one sample machine-gunned.
+  hit: { d: 0.09, n: 4, f: (ac, o, R) => {
+    nz(ac, o, R, 0, { type: 'highpass', f0: 4200, d: 0.004, g: 0.9 });
+    nz(ac, o, R, 0, { f0: j(R, 1700, 0.08), q: 3, d: 0.018, g: 1.1 });
+    tn(ac, o, 0, { type: 'triangle', f0: j(R, 1250, 0.05), f1: 900, d: 0.028, g: 0.7 });
+    tn(ac, o, 0, { f0: 190, f1: 110, d: 0.035, g: 0.55 });
+  } },
+  // headshot: brighter and harder - a crack with a short helmet "tink" (inharmonic, gone in ~90 ms). No long bell.
+  headshot: { d: 0.2, n: 3, f: (ac, o, R) => hsCrack(ac, o, R, 1) },
+  // kill: low and final - a sub drop, a dull body thud and a short dark two-note confirm underneath
+  kill: { d: 0.45, n: 2, f: (ac, o, R) => killThump(ac, o, R, 1) },
+  // headshot kill: the crack and the thump together, answered by one clean high ring
+  headkill: { d: 0.7, n: 1, f: (ac, o, R) => {
+    hsCrack(ac, o, R, 1); killThump(ac, o, R, 0.9);
+    bell(ac, o, 0.035, 2637, 0.42, 0.26, [1, 2.0]); tn(ac, o, 0.035, { f0: 2637 * 1.005, d: 0.3, g: 0.07 });
   } },
   // multi-kill note (the engine plays it 2, 3, 4... times, climbing) and the score counter tick
   blip: { d: 0.3, n: 1, f: (ac, o, R) => { nz(ac, o, R, 0, { type: 'highpass', f0: 5000, d: 0.004, g: 0.5 }); bell(ac, o, 0, 1568, 0.22, 0.6, [1, 2, 3.01, 4.1]); tn(ac, o, 0, { type: 'triangle', f0: 784, d: 0.1, g: 0.25 }); } },
@@ -215,13 +220,6 @@ export const SOUNDS = {
   shell: { d: 0.4, n: 3, f: (ac, o, R) => {
     let t = 0, g = 1;
     for (let b = 0; b < 2; b++) { nz(ac, o, R, t, { f0: j(R, 1300, 0.15), q: 3, d: 0.02, g: g * 1.4 }); tn(ac, o, t, { f0: j(R, 880, 0.1), f1: 640, d: 0.035, g: g * 0.6 }); tn(ac, o, t, { f0: j(R, 3300, 0.1), d: 0.03, g: g * 0.12 }); t += 0.1 + R() * 0.06; g *= 0.4; }
-  } },
-  kill: { d: 0.75, n: 1, f: (ac, o, R) => {
-    tn(ac, o, 0, { f0: 230, f1: 120, d: 0.07, g: 1.0 }); nz(ac, o, R, 0, { type: 'highpass', f0: 4500, d: 0.006, g: 0.8 });
-    bell(ac, o, 0, 1318.5, 0.16, 0.6, [1, 2, 3.01]);
-    bell(ac, o, 0.075, 1975.5, 0.5, 0.65, [1, 2, 2.99, 4.2]);
-    tn(ac, o, 0.075, { type: 'triangle', f0: 987.8, d: 0.3, g: 0.25 });
-    nz(ac, o, R, 0.075, { f0: 9000, q: 2, d: 0.16, g: 0.45 });
   } },
 
   // boot on concrete: a dull low thud and a little scuff. No click, no pitch.
@@ -277,14 +275,86 @@ export const SOUNDS = {
   } },
 };
 
-function hsSig(ac, o, R, g) {
-  nz(ac, o, R, 0, { type: 'highpass', f0: 6500, d: 0.003, g: 1.0 * g });                // tick
-  tn(ac, o, 0, { type: 'triangle', f0: 620, f1: 620, d: 0.02, g: 0.5 * g });              // knock (no sweep)
-  bell(ac, o, 0, 2637, 0.03, 0.55 * g, [1, 2.0]);                                          // grace note E7
-  bell(ac, o, 0.022, 3951.1, 0.3, 0.7 * g, [1, 2.0, 2.99, 4.3]);                           // B7 bell
-  tn(ac, o, 0.022, { f0: 3951.1 * 1.006, d: 0.22, g: 0.18 * g });                          // slow beat = shimmer
-  nz(ac, o, R, 0.022, { f0: 9500, q: 4, d: 0.07, g: 0.35 * g });
+function hsCrack(ac, o, R, g) {
+  const f = j(R, 3100, 0.03);
+  nz(ac, o, R, 0, { type: 'highpass', f0: 6000, d: 0.004, g: 1.0 * g });                 // click
+  nz(ac, o, R, 0, { f0: 5200, q: 2.5, d: 0.03, g: 1.1 * g });                              // crack
+  tn(ac, o, 0, { type: 'triangle', f0: 700, d: 0.016, g: 0.45 * g });                      // knock
+  [[1, 0.09, 0.5], [1.52, 0.07, 0.34], [2.33, 0.05, 0.2]].forEach((m) => tn(ac, o, 0.002, { f0: f * m[0], d: m[1], g: m[2] * g })); // tink
 }
+function killThump(ac, o, R, g) {
+  const bus = drive(ac, o, 2.2, 0.8);
+  tn(ac, bus, 0, { f0: j(R, 115, 0.05), f1: 48, d: 0.17, g: 1.2 * g, sd: 0.1 });         // sub drop
+  nz(ac, bus, R, 0, { kind: 'brown', type: 'lowpass', f0: 210, d: 0.12, g: 1.6 * g, q: 0.6 }); // body
+  nz(ac, bus, R, 0, { f0: 520, q: 2, d: 0.03, g: 0.9 * g });                               // knock
+  nz(ac, o, R, 0, { type: 'highpass', f0: 3500, d: 0.005, g: 0.5 * g });                   // click
+  tn(ac, o, 0.012, { type: 'triangle', f0: 220, a: 0.004, d: 0.2, g: 0.2 * g }); tn(ac, o, 0.012, { type: 'triangle', f0: 164.8, a: 0.004, d: 0.24, g: 0.16 * g });
+}
+// radio-voiced bark for the android guards: a sawtooth "glottis" through two or three formants, band-limited
+// and lightly overdriven like a helmet speaker. Not words - a contour (alert rises then falls, query rises).
+function vox(ac, out, R, t, o) {
+  const hp = filt(ac, 'highpass', 380, 0.7), lp = filt(ac, 'lowpass', 2900, 0.7); hp.connect(lp); lp.connect(out);
+  const dr = drive(ac, hp, 3, 1.2), e = env(ac, t, 0.012, o.d, o.g); e.connect(dr);
+  const os = ac.createOscillator(); os.type = 'sawtooth'; sweep(os.frequency, t, o.f0, o.f1, o.d * 0.8);
+  const n = nsrc(ac, R, t, o.d), ng = ac.createGain(); ng.gain.value = o.breath || 0.15; n.connect(ng);
+  for (const F of o.F) { const b = filt(ac, 'bandpass', F[0], F[1]), g = ac.createGain(); g.gain.value = F[2]; os.connect(b); ng.connect(b); b.connect(g); g.connect(e); }
+  os.start(t); os.stop(t + o.d + 0.1);
+}
+Object.assign(SOUNDS, {
+  // ---- gun layers ---------------------------------------------------------------------------------------
+  sub_heavy: { d: 0.9, n: 2, peak: 0.6, raw: (R) => subPunch('gun_heavy', R) },
+  mech_rifle: { d: 0.2, n: 4, peak: 0.6, raw: (R) => mechSound('rifle', R) },
+  mech_pistol: { d: 0.2, n: 3, peak: 0.6, raw: (R) => mechSound('pistol', R) },
+  // ---- incoming fire ------------------------------------------------------------------------------------
+  // the round going past after its snap: a short falling hiss (doppler), no tone
+  flyby: { d: 0.3, n: 4, f: (ac, o, R) => { nz(ac, o, R, 0, { f0: j(R, 3600, 0.15), f1: j(R, 1100, 0.15), q: 3, a: 0.03, d: 0.2, g: 1, sd: 0.18 }); nz(ac, o, R, 0, { type: 'highpass', f0: 5000, a: 0.02, d: 0.08, g: 0.3 }); } },
+  // a round hitting an armoured guard: dull thwack + a ceramic "tk"
+  imp_body: { d: 0.2, n: 4, f: (ac, o, R) => { nz(ac, o, R, 0, { type: 'lowpass', f0: 1400, f1: 400, d: 0.05, g: 1 }); tn(ac, o, 0, { f0: j(R, 170, 0.1), f1: 80, d: 0.06, g: 0.9 }); nz(ac, o, R, 0, { f0: j(R, 2600, 0.12), q: 5, d: 0.02, g: 0.7 }); nz(ac, o, R, 0, { type: 'highpass', f0: 5000, d: 0.004, g: 0.5 }); } },
+  // ---- guards / machines as information -----------------------------------------------------------------
+  vox_alert: { d: 0.5, n: 3, f: (ac, o, R) => {
+    const p = j(R, 150, 0.1);
+    vox(ac, o, R, 0, { f0: p, f1: p * 1.18, d: 0.11, g: 1, F: [[720, 5, 1], [1150, 6, 0.7], [2500, 8, 0.3]] });
+    vox(ac, o, R, 0.14, { f0: p * 1.27, f1: p * 0.92, d: 0.22, g: 1, F: [[560, 5, 1], [1700, 7, 0.6], [2500, 8, 0.3]] });
+    nz(ac, o, R, 0.39, { type: 'highpass', f0: 2000, d: 0.03, g: 0.2 });
+  } },
+  vox_sus: { d: 0.36, n: 2, f: (ac, o, R) => { const p = j(R, 118, 0.08); vox(ac, o, R, 0, { f0: p, f1: p * 1.35, d: 0.24, g: 1, F: [[420, 5, 1], [1000, 6, 0.45]] }); nz(ac, o, R, 0.28, { type: 'highpass', f0: 2000, d: 0.025, g: 0.15 }); } },
+  vox_hurt: { d: 0.22, n: 3, f: (ac, o, R) => { const p = j(R, 170, 0.1); vox(ac, o, R, 0, { f0: p, f1: p * 0.65, d: 0.13, g: 1, breath: 0.5, F: [[650, 4, 1], [1250, 5, 0.5]] }); } },
+  // a guard about to fire: weapon coming up (a short rising servo chirp and a click)
+  tell: { d: 0.16, n: 2, f: (ac, o, R) => { const lp = filt(ac, 'lowpass', 2600); lp.connect(o); tn(ac, lp, 0, { type: 'square', f0: j(R, 900, 0.05), f1: 1500, a: 0.01, d: 0.07, g: 0.3, sd: 0.07 }); nz(ac, o, R, 0.085, { type: 'highpass', f0: 2800, d: 0.008, g: 0.8 }); tn(ac, o, 0.085, { f0: 250, f1: 180, d: 0.03, g: 0.5 }); } },
+  servo: { d: 0.12, n: 3, f: (ac, o, R) => { nz(ac, o, R, 0, { f0: j(R, 1400, 0.1), q: 6, a: 0.01, d: 0.05, g: 0.8 }); tn(ac, o, 0, { type: 'square', f0: j(R, 310, 0.08), d: 0.04, g: 0.22 }); nz(ac, o, R, 0.05, { type: 'highpass', f0: 4000, d: 0.004, g: 0.5 }); } },
+  drone_loop: { d: 1.0, n: 1, loop: 0.25, peak: 0.6, f: (ac, o, R) => {
+    const D = 1.4, lp = filt(ac, 'lowpass', 1500, 0.7), am = ac.createGain(); am.gain.value = 0.65; lp.connect(am); am.connect(o);
+    const lfo = ac.createOscillator(), lg = ac.createGain(); lfo.frequency.value = 43; lg.gain.value = 0.35; lfo.connect(lg); lg.connect(am.gain); lfo.start(0); lfo.stop(D);
+    [172, 178.5, 344, 357].forEach((hz, i) => { const os = ac.createOscillator(); os.type = 'sawtooth'; os.frequency.value = hz; const g = ac.createGain(); g.gain.value = i < 2 ? 0.3 : 0.1; os.connect(g); g.connect(lp); os.start(0); os.stop(D); });
+    const n = nsrc(ac, R, 0, D), bp = filt(ac, 'bandpass', 3200, 1.2), ng = ac.createGain(); ng.gain.value = 0.3; n.connect(bp); bp.connect(ng); ng.connect(am);
+  } },
+  // ---- the player's own body / the raid closing in ------------------------------------------------------
+  breath: { d: 1.3, n: 2, peak: 0.5, f: (ac, o, R) => { nz(ac, o, R, 0, { f0: j(R, 1100, 0.1), f1: 1600, q: 1.2, a: 0.25, d: 0.25, g: 0.5 }); nz(ac, o, R, 0.6, { f0: j(R, 900, 0.1), f1: 500, q: 1.0, a: 0.12, d: 0.5, g: 0.7 }); } },
+  // tension bed: a dark beating drone (no melody, no rhythm of its own); the engine opens and raises it with heat
+  tension: { d: 8, n: 1, stereo: true, loop: 1.5, peak: 0.5, f: (ac, o, R) => {
+    const D = 9.7, m = ac.createChannelMerger(2); m.connect(o);
+    for (let c = 0; c < 2; c++) {
+      const g = filt(ac, 'lowpass', 700, 0.5); g.connect(m, 0, c);
+      [[41.2 * (c ? 1.004 : 1), 0.5], [61.74 * (c ? 0.997 : 1), 0.18], [82.4 * (c ? 1 : 1.006), 0.09], [123.5 * (c ? 1.003 : 1), 0.04]].forEach((p) => { const os = ac.createOscillator(); os.frequency.value = p[0]; const og = ac.createGain(); og.gain.value = p[1]; os.connect(og); og.connect(g); os.start(0); os.stop(D); });
+      const n = nsrc(ac, R, 0, D, 'brown'), nl = filt(ac, 'lowpass', 130), ng = ac.createGain(); ng.gain.value = 0.9;
+      const lfo = ac.createOscillator(), lg = ac.createGain(); lfo.frequency.value = 0.11 + R() * 0.1; lg.gain.value = 0.45; lfo.connect(lg); lg.connect(ng.gain); lfo.start(0); lfo.stop(D);
+      n.connect(nl); nl.connect(ng); ng.connect(g);
+      // a thin, slowly beating high partial: unease rather than pitch
+      const hi = ac.createOscillator(), hg = ac.createGain(); hi.frequency.value = 1244.5 * (c ? 1.003 : 0.998); hg.gain.value = 0.006; hi.connect(hg); hg.connect(m, 0, c); hi.start(0); hi.stop(D);
+    }
+  } },
+  pulse: { d: 0.3, n: 1, peak: 0.7, f: (ac, o, R) => { tn(ac, o, 0, { f0: 52, f1: 40, a: 0.008, d: 0.16, g: 1 }); nz(ac, o, R, 0, { kind: 'brown', type: 'lowpass', f0: 90, a: 0.006, d: 0.12, g: 0.8 }); } },
+  // heat tier went up: one low ominous hit with a dissonant swell under it
+  stinger: { d: 2.6, n: 1, peak: 0.8, f: (ac, o, R) => {
+    const tail = conv(ac, o, 1200, 0.4), p = ac.createGain(); p.connect(o); p.connect(tail);
+    tn(ac, p, 0, { f0: 55, f1: 30, d: 1.6, g: 1.2, sd: 1.2 });
+    nz(ac, p, R, 0, { kind: 'brown', type: 'lowpass', f0: 180, f1: 60, d: 1.8, g: 1.2, q: 0.5 });
+    const f = filt(ac, 'lowpass', 300, 1.5); sweep(f.frequency, 0, 900, 120, 1.4); f.connect(p);
+    [[73.4, 0.35], [77.8, 0.3], [110, 0.15]].forEach((x) => tn(ac, f, 0, { type: 'sawtooth', f0: x[0], a: 0.02, d: 1.6, g: x[1] }));
+    nz(ac, p, R, 0, { f0: 2300, q: 12, a: 0.3, d: 1.2, g: 0.12 });
+    nz(ac, p, R, 0, { type: 'highpass', f0: 1500, d: 0.02, g: 0.5 });
+  } },
+});
 
 function rubble(ac, o, R, dur, n, lp) {
   nz(ac, o, R, 0, { f0: j(R, 1500, 0.2), d: 0.035, g: 0.9, q: 1 });
