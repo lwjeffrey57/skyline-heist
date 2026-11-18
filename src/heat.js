@@ -8,8 +8,8 @@ const TIERS = [
   { at: 0, name: 'Quiet', color: '#9be37a', bots: 0, respawn: 25, aggr: 0, bonus: 0, note: '' },
   { at: 20, name: 'Stirring', color: '#ffe14a', bots: 1, respawn: 18, aggr: 0.25, bonus: 0.1, note: 'More guards on patrol' },
   { at: 40, name: 'Alarm', color: '#ff9a3c', bots: 2, respawn: 13, aggr: 0.5, bonus: 0.25, note: 'Hunters are looking for you' },
-  { at: 62, name: 'Lockdown', color: '#ff5a4a', bots: 3, respawn: 9, aggr: 0.75, bonus: 0.4, note: 'The site is filling with guards' },
-  { at: 84, name: 'Kill order', color: '#ff2d55', bots: 4, respawn: 6, aggr: 1, bonus: 0.6, note: 'Everything on site is coming for you' },
+  { at: 62, name: 'Lockdown', color: '#ff5a4a', bots: 3, respawn: 11, aggr: 0.75, bonus: 0.4, note: 'The site is filling with guards' },
+  { at: 84, name: 'Kill order', color: '#ff2d55', bots: 4, respawn: 9, aggr: 1, bonus: 0.6, note: 'Everything on site is coming for you' },
 ];
 const GAIN = { second: 0.055, shot: 0.35, quietShot: 0.05, kill: 2, machineKill: 3, alert: 1.5, blast: 2 };
 

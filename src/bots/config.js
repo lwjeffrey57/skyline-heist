@@ -22,13 +22,13 @@ export const CONFIG = {
   kinds: {
     grunt: { weight: 4, label: 'Guard', scale: 1.0, color: 0xff4a1c, set: {}, mul: {} },
     heavy: { weight: 2, max: 2, label: 'Heavy', scale: 1.15, color: 0xff1a3c, role: 'active',
-      set: { hp: 240, burst: [7, 12], burstPause: [0.9, 1.6], magSize: 60, reloadTime: 3.2 },
+      set: { hp: 240, burst: [7, 12], burstPause: [0.9, 1.6], magSize: 60, reloadTime: 3.2, staggerDamage: 80, staggerSustain: 130, staggerResist: 0.5, suppressResist: 0.8, flinchScale: 0.6, tellTime: 0.4, defensiveChance: 0.15 },
       mul: { walkSpeed: 0.72, sprintSpeed: 0.7, patrolSpeed: 0.8, combatSpeed: 0.65, damage: 1.15, aimSpeed: 0.75 } },
     scout: { weight: 2, max: 2, label: 'Scout', scale: 0.92, color: 0x35e0ff, role: 'active',
       set: { hp: 70, engageRange: 20, burst: [4, 8], burstPause: [0.25, 0.6], accuracyByRange: [[0, 0.8], [8, 0.6], [16, 0.35], [24, 0.15]] },
       mul: { walkSpeed: 1.25, sprintSpeed: 1.25, patrolSpeed: 1.35, combatSpeed: 1.35, damage: 0.75, fireRate: 1.3 } },
     marksman: { weight: 1, max: 1, label: 'Marksman', scale: 1.0, color: 0xffe14a, role: 'passive',
-      set: { hp: 90, engageRange: 55, sightRangePassive: 50, burst: [1, 1], burstPause: [1.8, 2.6], reactionTime: [0.9, 1.3], accuracyByRange: [[0, 0.6], [20, 0.55], [40, 0.45], [55, 0.3]] },
+      set: { hp: 90, engageRange: 55, sightRangePassive: 50, burst: [1, 1], burstPause: [1.8, 2.6], reactionTime: [0.9, 1.3], tellTime: 0.6, accuracyByRange: [[0, 0.6], [20, 0.55], [40, 0.45], [55, 0.3]] },
       mul: { damage: 4.5 } },
   },
   passiveShare: 0.5,        // share of living guards that hold a post instead of patrolling the map
@@ -106,6 +106,7 @@ export const CONFIG = {
     selfMoving: 0.7,        // the bot itself is moving (> 1 m/s)
     firstBurst: 0.4,        // first burst after (re)acquiring: mostly misses that walk in
     recentlyHit: 0.5,       // the bot took damage within recentlyHitTime
+    suppressed: 0.7,        // rounds have been passing close (suppression > 0.5)
   },
   recentlyHitTime: 1.0,
   missOffset: [0.25, 0.95],    // m beside the body (beyond its radius) a deliberate miss is aimed at, at 0 m range
@@ -134,6 +135,28 @@ export const CONFIG = {
   peekTime: [1.3, 2.4],        // time spent out of cover shooting
   repositionInterval: [0.9, 2.2], // strafe / shift position this often while engaging
   tacticalRadius: 12,          // how far they look for a better position
+
+  // ---- being shot: flinch, stagger, suppression, tell ------------------------
+  flinchScale: 1,              // size of the body's hit reactions
+  staggerDamage: 42,           // damage landing at the same instant (pellets add up) that staggers; a headshot needs 55 % of it
+  staggerSustain: 62,          // ... or this much within about a second of sustained fire (decays)
+  staggerResist: 1,            // multiplies stagger length and knock-back (heavies 0.5)
+  staggerImmunity: 1.1,        // s after a stagger ends during which only a very heavy hit staggers again (no stun-lock)
+  legHitSlow: 0.45,            // speed multiplier while limping after a leg hit
+  suppressPerMiss: 0.34,       // suppression added per round passing within suppressRadius (decays by suppressDecay / s)
+  suppressRadius: 1.4,         // m
+  suppressAt: 0.6,             // suppression level at which the guard ducks and hesitates
+  suppressDecay: 0.45,
+  suppressResist: 0,           // 0..1: 1 never ducks (heavies 0.8)
+  tellTime: 0.28,              // s the weapon is visibly raised (visor flare) before every burst — the fairness window
+  lowReady: 0.66,              // weapon pose between bursts (1 = shouldered)
+  underFireCover: 0.45,        // chance a guard hit in the open breaks for cover (else it sidesteps); rises as it loses health
+  defensiveChance: 0.5,        // chance a guard dropping below retreatHp turns defensive: falls back, long cover, short peeks
+  campTime: 9,                 // s the player stays within campRadius before a guard flanks / pushes (shorter with aggression)
+  campRadius: 6,
+  flankShare: 0.6,             // of those moves, the share that go round the side (the rest push straight in)
+  aggrReaction: 0.4,           // at aggression 1 reaction times are this much shorter
+  calloutInterval: 0.9,        // min s between any two botCallout events (and 5 s between two of the same kind)
 
   // ---- navigation ---------------------------------------------------------
   nav: {

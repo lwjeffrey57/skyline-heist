@@ -13,7 +13,6 @@ import * as detect from './detect.js';
 import * as ui from './ui.js';
 import * as dmgnum from './dmgnum.js';
 import * as settings from './settings.js';
-import * as hitreact from './hitreact.js';
 import * as map from './map.js';
 import * as drones from './drones.js';
 import * as turrets from './turrets.js';
@@ -46,7 +45,7 @@ events.on('pieceSplit', ({ collider, parts }) => {
 events.on('pieceDestroyed', ({ collider }) => { if (collider.zipline) world.removeZipline(collider.zipline); });
 
 const systems = [];
-for (const [name, mod] of Object.entries({ destruction, decor, fx, audio, weapons, bots, raid, heat, detect, ui, dmgnum, settings, hitreact, map, drones, turrets })) {
+for (const [name, mod] of Object.entries({ destruction, decor, fx, audio, weapons, bots, raid, heat, detect, ui, dmgnum, settings, map, drones, turrets })) {
   try { const s = mod.init(ctx); if (s) systems.push({ name, ...s }); } catch (e) { console.error(`[${name}] init failed`, e); }
 }
 

@@ -7,8 +7,12 @@ import * as THREE from 'three';
 // boxy carbine. Fully procedural animation:
 //   legs  — two-bone IK driven by a gait cycle synced to ground speed and direction
 //   arms  — two-bone IK onto the weapon, which points exactly along the aim direction
-//   torso — twists toward the aim, leans into movement, flinches when hit
-//   death — knees buckle, the body topples away from the shot, the weapon drops, then it fades
+//   torso — twists toward the aim, leans into movement
+//   hits  — spring-driven reactions by zone: torso recoils and twists away from the shot, the head snaps on
+//           headshots, a leg hit buckles the hips; a stagger drops the weapon off target and hunches the body
+//   tell  — between bursts the carbine sits at low ready; it snaps up and the visor flares just before firing
+//   death — a parameterised procedural fall (see die()): crumple, topple, spin, tumble, thrown ... every one is
+//           randomised (fall axis, twist, limb rest pose), the weapon is knocked away, then the body fades
 // Local space: +Y up, +Z forward, -X is the bot's right-hand side.
 // =============================================================================
 
@@ -20,6 +24,7 @@ const DOWN = new THREE.Vector3(0, -1, 0);
 const Q_RELAX = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.62, 0.55, 0.15, 'YXZ'));
 
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3(), v4 = new THREE.Vector3(), v5 = new THREE.Vector3();
 const q1 = new THREE.Quaternion(), q2 = new THREE.Quaternion(), q3 = new THREE.Quaternion();
 const e1 = new THREE.Euler();
@@ -153,12 +158,18 @@ export class BotBody {
 
     this.gunVel = new THREE.Vector3(); this.gunSpin = new THREE.Vector3();
     this.fallAxis = new THREE.Vector3(1, 0, 0);
+    this.legHit = [0, 0];
+    // death parameters (filled by die())
+    this.dp = { style: 'topple', delay: 0, sink: 0.36, sinkT: 0.3, end: Math.PI / 2, yaw: 0, yawV: 0, flail: 0.5, flX: 0, flZ: 0, torsoX: 0.4, torsoY: 0, torsoZ: 0.1, headX: 0.5, headY: 0, headZ: 0.3,
+      arm: [new THREE.Vector3(), new THREE.Vector3()], legX: [0, 0], legY: [0, 0], legZ: [0, 0], bounce: 0, bounceV: 0 };
     this.reset();
   }
 
   reset() {
     this.phase = Math.random() * 6; this.visY = null; this.mx = 0; this.mz = 1; this.sn = 0; this.air = 0;
     this.flP = 0; this.flR = 0; this.flPV = 0; this.flRV = 0; this.kick = 0; this.aimBlend = 0; this.twist = 0; this.lean = 0; this.leanS = 0;
+    this.flY = 0; this.flYV = 0; this.hdP = 0; this.hdPV = 0; this.hdR = 0; this.hdRV = 0; this.hdY = 0; this.hdYV = 0; this.dip = 0; this.dipV = 0;
+    this.stagS = 0; this.crouch = 0; this.tellS = 0; this.limpS = 0; this.legHit[0] = 0; this.legHit[1] = 0; this.glow = -1; this.setGlow(0);
     this.dead = false; this.deadT = 0; this.fall = 0; this.fallV = 0; this.limp = 0; this.gunLoose = false; this.gunRest = false;
     this.tilt.quaternion.identity(); this.tilt.position.set(0, 0, 0);
     this.torso.add(this.gun); this.gun.scale.setScalar(1);
@@ -180,22 +191,80 @@ export class BotBody {
   hide() { this.root.visible = false; this.gun.visible = false; this.bar.visible = false; }
 
   // impulse in the bot's local frame (lx: toward its left, lz: forward) — positive lz = hit from behind
-  flinch(lx, lz, strength = 1) { this.flPV += lz * 5.5 * strength; this.flRV += -lx * 5.5 * strength; }
+  // side (-1..1): where across the body the round landed (+ = its left) -> the torso twists away from it
+  // zone: 'torso' | 'head' | 'leg'
+  flinch(lx, lz, strength = 1, side = 0, zone = 'torso') {
+    const k = zone === 'leg' ? 0.45 : 1;
+    this.flPV = clamp(this.flPV + lz * 5.5 * strength * k, -11, 11); this.flRV = clamp(this.flRV - lx * 5.5 * strength * k, -11, 11);
+    this.flYV = clamp(this.flYV + side * -lz * 9 * strength * k + side * 2 * strength, -12, 12);
+    if (zone === 'head') { // the head whips with the shot, the torso follows
+      this.hdPV = clamp(this.hdPV + lz * 11 * strength, -13, 13); this.hdRV = clamp(this.hdRV - lx * 11 * strength, -13, 13);
+      this.hdYV = clamp(this.hdYV + (side || (Math.random() - 0.5)) * 9 * strength, -12, 12);
+    } else if (zone === 'leg') this.legBuckle(side, strength);
+  }
+  // a leg was hit: the hips drop and roll over that leg, the torso pitches forward to catch the balance
+  legBuckle(side, strength = 1) {
+    const i = side >= 0 ? 0 : 1; // leg[0] is the left (+x) one
+    this.legHit[i] = Math.min(1, this.legHit[i] + 0.7 * strength);
+    this.dipV = Math.max(-3.2, this.dipV - 1.9 * strength); this.flPV = clamp(this.flPV + 3.2 * strength, -11, 11);
+  }
   fireKick() { this.kick = 1; }
 
-  // start the collapse; (lx, lz) = local direction the body should fall toward
-  die(lx, lz, worldVel) {
-    this.dead = true; this.deadT = 0; this.fall = 0.05; this.fallV = 1.6; this.limp = 0;
-    const l = Math.hypot(lx, lz) || 1; this.fallAxis.set(lz / l, 0, -lx / l);
-    // drop the weapon: hand it over to the scene with a little toss
+  // Start the collapse. o = { lx, lz: local direction the body is driven toward (the shot / blast / its own momentum),
+  //   style: 'topple' | 'crumple' | 'snapback' | 'slump' | 'spin' | 'blown' | 'tumble' | 'thrown', force (0..1.5),
+  //   side (-1..1: where across the body the round landed), vel (world velocity), dirX, dirZ (world shot direction) }
+  // Every style randomises its fall axis, twist and the limb pose the body comes to rest in.
+  die(o = {}, lz0, vel0) {
+    if (typeof o === 'number') o = { lx: o, lz: lz0, vel: vel0 }; // old signature: die(lx, lz, worldVel)
+    const P = this.dp, R = (a, b) => a + Math.random() * (b - a), force = o.force ?? 0.6, side = o.side || 0;
+    let lx = o.lx || 0, lz = o.lz ?? -1, fallV = R(1.3, 2.3);
+    const style = P.style = o.style || 'topple';
+    P.delay = 0; P.sink = R(0.3, 0.4); P.sinkT = 0.3; P.end = Math.PI / 2 + R(-0.05, 0.04); P.yaw = 0; P.yawV = -side * R(1.2, 2.6) + R(-0.9, 0.9); P.flail = R(0.4, 0.7);
+    P.torsoX = R(0.1, 0.5); P.torsoY = R(-0.35, 0.35); P.torsoZ = R(-0.2, 0.2); P.headX = R(-0.1, 0.5); P.headY = R(-0.6, 0.6); P.headZ = R(-0.35, 0.35);
+    P.bounce = 0; P.bounceV = 0;
+    switch (style) {
+      case 'crumple': P.delay = R(0.07, 0.13); P.sink = R(0.42, 0.52); P.sinkT = 0.2; fallV = R(1.0, 1.5); P.flail = 0.15; P.torsoX = R(0.35, 0.7); P.yawV *= 0.5; lx += R(-0.5, 0.5); break;
+      case 'slump': P.delay = R(0.2, 0.32); P.sink = R(0.42, 0.52); P.sinkT = 0.3; fallV = R(0.7, 1.1); P.flail = 0.2; { const a = R(-1.1, 1.1); lx = Math.sin(a); lz = Math.cos(a); } P.torsoX = R(0.3, 0.6); break;
+      case 'snapback': P.sink = R(0.14, 0.24); fallV = R(3.0, 3.8) + force; P.flail = R(0.8, 1.1); P.torsoX = R(-0.25, 0.1); P.headX = R(-0.6, -0.2); break;
+      case 'spin': P.yawV = (side ? -Math.sign(side) : Math.random() < 0.5 ? 1 : -1) * R(4.2, 6.5); fallV = R(1.0, 1.6); P.sink = R(0.3, 0.45); P.flail = R(0.6, 0.9); break;
+      case 'blown': P.sink = R(0.18, 0.28); fallV = R(2.6, 3.4) + force * 0.8; P.flail = R(0.8, 1.1); P.yawV = -side * R(2, 3.5) + R(-1, 1); P.torsoX = R(-0.2, 0.25); break;
+      case 'tumble': P.sink = R(0.2, 0.3); fallV = R(2.8, 3.6) + force; P.flail = R(0.7, 1.0); P.torsoX = R(0, 0.3); P.yawV = R(-1.6, 1.6); break;
+      case 'thrown': P.sink = R(0.1, 0.2); fallV = 3.6 + 2.2 * force + R(0, 1); P.flail = 1.1; P.yawV = R(-3.5, 3.5) - side * 2; P.torsoX = R(-0.3, 0.3); P.end = Math.PI / 2; break;
+      default: lx += R(-0.35, 0.35); lz += R(-0.2, 0.2);
+    }
+    for (let i = 0; i < 2; i++) {
+      const sgn = this.arm[i].s;
+      P.arm[i].set(sgn * R(0.2, 0.52), R(-0.12, 0.42), R(-0.05, 0.12)); // hand rest spot in torso space (pulled to the floor side later)
+      P.legX[i] = R(0.0, 0.16); P.legY[i] = Math.random() < 0.4 ? R(0.12, 0.34) : R(0, 0.05); P.legZ[i] = R(-0.12, 0.16);
+    }
+    const l = Math.hypot(lx, lz) || 1; lx /= l; lz /= l;
+    P.flX = lx; P.flZ = lz;
+    this.dead = true; this.deadT = 0; this.fall = 0.05; this.fallV = fallV; this.limp = 0;
+    this.fallAxis.set(lz, 0, -lx);
+    // the weapon is knocked out of the hands: tossed with the shot, spinning
     this.root.updateMatrixWorld(true);
     this.scene.attach(this.gun); this.gunLoose = true; this.gunRest = false;
-    this.gunVel.set((Math.random() - 0.5) * 1.5, 1.6, (Math.random() - 0.5) * 1.5); if (worldVel) this.gunVel.addScaledVector(worldVel, 0.6);
-    this.gunSpin.set((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 6);
-    this.bar.visible = false;
+    this.gunVel.set((Math.random() - 0.5) * 1.8 + (o.dirX || 0) * 2.4 * force, 1.4 + 1.6 * force * Math.random(), (Math.random() - 0.5) * 1.8 + (o.dirZ || 0) * 2.4 * force);
+    if (o.vel) this.gunVel.addScaledVector(o.vel, 0.6);
+    this.gunSpin.set((Math.random() - 0.5) * 7, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 7).multiplyScalar(0.7 + force * 0.6);
+    this.bar.visible = false; this.setGlow(0);
+  }
+  // refine a death that has just started with where the killing round landed
+  deathHint(zone, side) {
+    if (!this.dead || this.deadT > 0.05) return;
+    const P = this.dp;
+    if (zone === 'leg' && (P.style === 'topple' || P.style === 'slump' || P.style === 'crumple')) { // the leg goes: down over it, forward
+      const lx = (side >= 0 ? 0.55 : -0.55) + (Math.random() - 0.5) * 0.3, lz = 0.85, l = Math.hypot(lx, lz);
+      P.flX = lx / l; P.flZ = lz / l; this.fallAxis.set(P.flZ, 0, -P.flX); P.delay = Math.max(P.delay, 0.12); P.sink = Math.max(P.sink, 0.46);
+    } else if (P.style === 'topple' || P.style === 'blown') P.yawV += -side * (1.2 + Math.random() * 1.6);
+  }
+  setGlow(k) {
+    if (this.glow === k) return; this.glow = k;
+    this.mats.visor.emissiveIntensity = 4.5 + 13 * k; this.mats.accent.emissiveIntensity = 4.5 + 5 * k;
   }
 
-  // s: { pos, bodyYaw, aimYaw, aimPitch, vel, grounded, aiming (0..1 target), hp01, showBar, camera, floorY }
+  // s: { pos, bodyYaw, aimYaw, aimPitch, vel, grounded, aiming (0..1 target), hp01, showBar, camera, floorY,
+  //      stag (0..1 staggered), crouch (0..1 ducked), tell (0..1 about to fire / firing), limp (0..1 hurt leg) }
   update(dt, s) {
     const root = this.root;
     // smooth the vertical snap of stair steps
@@ -217,9 +286,17 @@ export class BotBody {
     this.air = damp(this.air, s.grounded ? 0 : 1, s.grounded ? 14 : 8, dt);
     const amp = stepLen * 0.46 * Math.min(1, speed / 1.2), liftH = 0.07 + 0.035 * sn + (speed > 6.5 ? 0.05 : 0);
     const bob = Math.cos(this.phase * 2) * 0.028 * sn;
-    const hipY = HIP_Y - 0.05 * sn - (speed > 6.5 ? 0.03 : 0) + bob - 0.02 * this.air + Math.sin(performance.now() * 0.0017 + this.phase0()) * 0.004;
-    this.hips.position.set(Math.sin(this.phase) * 0.018 * sn, hipY, 0);
-    this.hips.rotation.set(0, Math.sin(this.phase) * 0.1 * sn * this.mz, 0);
+    // hit reactions that reach the legs: stagger, duck, a buckling / limping leg
+    const st = this.stagS = damp(this.stagS, s.stag || 0, (s.stag || 0) > this.stagS ? 30 : 8, dt);
+    const cr = this.crouch = damp(this.crouch, s.crouch || 0, (s.crouch || 0) > this.crouch ? 14 : 7, dt);
+    const lp = this.limpS = damp(this.limpS, s.limp || 0, 8, dt);
+    this.dipV += (-110 * this.dip - 13 * this.dipV) * dt; this.dip = clamp(this.dip + this.dipV * dt, -0.3, 0.08);
+    const lh0 = this.legHit[0] = damp(this.legHit[0], 0, 3.2, dt), lh1 = this.legHit[1] = damp(this.legHit[1], 0, 3.2, dt), lhs = lh0 - lh1;
+    const limpDip = lp * 0.05 * Math.max(0, Math.sin(this.phase + (lhs < 0 ? Math.PI : 0)));
+    const hipY = HIP_Y - 0.05 * sn - (speed > 6.5 ? 0.03 : 0) + bob - 0.02 * this.air + Math.sin(performance.now() * 0.0017 + this.phase0()) * 0.004
+      - 0.3 * cr - 0.11 * st + this.dip - limpDip - 0.07 * Math.max(lh0, lh1);
+    this.hips.position.set(Math.sin(this.phase) * 0.018 * sn + lhs * 0.05, hipY, -0.05 * cr);
+    this.hips.rotation.set(0, Math.sin(this.phase) * 0.1 * sn * this.mz, lhs * 0.2);
 
     for (let i = 0; i < 2; i++) {
       const L = this.leg[i], ph = this.phase + (i ? Math.PI : 0), p = Math.sin(ph), c = Math.cos(ph);
@@ -246,10 +323,19 @@ export class BotBody {
     this.lean = damp(this.lean, lf * 0.028, 8, dt); this.leanS = damp(this.leanS, ls * 0.014, 8, dt);
     this.flPV += (-140 * this.flP - 15 * this.flPV) * dt; this.flP += this.flPV * dt;
     this.flRV += (-140 * this.flR - 15 * this.flRV) * dt; this.flR += this.flRV * dt;
+    this.flYV += (-120 * this.flY - 13 * this.flYV) * dt; this.flY += this.flYV * dt;
+    this.hdPV += (-170 * this.hdP - 13 * this.hdPV) * dt; this.hdP += this.hdPV * dt;
+    this.hdRV += (-170 * this.hdR - 13 * this.hdRV) * dt; this.hdR += this.hdRV * dt;
+    this.hdYV += (-170 * this.hdY - 13 * this.hdYV) * dt; this.hdY += this.hdYV * dt;
+    this.flP = clamp(this.flP, -0.8, 0.8); this.flR = clamp(this.flR, -0.7, 0.7); this.flY = clamp(this.flY, -0.85, 0.85);
+    this.hdP = clamp(this.hdP, -0.85, 0.85); this.hdR = clamp(this.hdR, -0.7, 0.7); this.hdY = clamp(this.hdY, -0.9, 0.9);
     this.kick = damp(this.kick, 0, 18, dt);
-    const ab = this.aimBlend = damp(this.aimBlend, s.aiming, 9, dt);
-    this.torso.rotation.set(this.lean + this.flP + 0.05 * (1 - ab) - s.aimPitch * 0.25 * ab, this.twist * 0.6, -this.leanS + this.flR, 'YXZ');
-    this.head.rotation.set(-s.aimPitch * 0.55 + this.flP * 0.6 - this.lean * 0.6, this.twist * 0.4, this.flR * 0.5, 'YXZ');
+    const tl = this.tellS = damp(this.tellS, s.tell || 0, (s.tell || 0) > this.tellS ? 26 : 5, dt);
+    this.setGlow(tl < 0.02 ? 0 : Math.round(tl * 20) / 20);
+    const aimT = s.aiming * (1 - 0.8 * st);
+    const ab = this.aimBlend = damp(this.aimBlend, aimT, aimT > this.aimBlend ? 17 : 9, dt);
+    this.torso.rotation.set(this.lean + this.flP + 0.05 * (1 - ab) - s.aimPitch * 0.25 * ab + 0.36 * cr + 0.3 * st + 0.05 * tl, this.twist * 0.6 + this.flY, -this.leanS + this.flR + (s.stagX || 0) * -0.22 * st - lhs * 0.12, 'YXZ');
+    this.head.rotation.set(-s.aimPitch * 0.55 + this.flP * 0.6 - this.lean * 0.6 + this.hdP - 0.3 * cr + 0.28 * st, this.twist * 0.4 + this.hdY + this.flY * 0.3, this.flR * 0.5 + this.hdR, 'YXZ');
 
     // ---- weapon + arms ----------------------------------------------------
     // torso world orientation = root yaw * hips * torso
@@ -281,33 +367,51 @@ export class BotBody {
   phase0() { return this._p0 ?? (this._p0 = Math.random() * 10); }
 
   updateDeath(dt, s) {
-    this.deadT += dt; const t = this.deadT;
-    // topple like an inverted pendulum whose legs have given way
-    if (this.fall < Math.PI / 2) {
+    this.deadT += dt; const t = this.deadT, P = this.dp;
+    // legs give way first (sink), then the body goes over like an inverted pendulum about a randomised axis,
+    // twisting about its own length (yaw) as it falls
+    let down = this.fall >= P.end;
+    if (!down && t >= P.delay) {
       this.fallV += (13 * Math.sin(this.fall) + 2.5) * dt; this.fall += this.fallV * dt;
-      if (this.fall >= Math.PI / 2) { this.fall = Math.PI / 2; if (this.fallV > 2.5) { this.fallV *= -0.22; this.fall += this.fallV * dt; } else this.fallV = 0; }
-    } else this.fall = Math.PI / 2;
-    const k = Math.min(1, t / 0.3), kk = k * k * (3 - 2 * k);
+      if (this.fall >= P.end) {
+        this.fall = P.end; down = true;
+        P.bounceV = Math.min(2.2, this.fallV * 0.22); // the impact: a small bounce, the limbs settle
+        this.fallV = 0;
+      }
+    }
+    P.bounceV += (-90 * P.bounce - 11 * P.bounceV) * dt; P.bounce += P.bounceV * dt;
+    P.yaw += P.yawV * dt; P.yawV = damp(P.yawV, 0, down ? 9 : 1.2, dt);
+    const k = Math.min(1, t / P.sinkT), kk = k * k * (3 - 2 * k);
     this.limp = kk;
-    this.tilt.quaternion.setFromAxisAngle(this.fallAxis, this.fall);
-    this.tilt.position.y = Math.sin(this.fall) * 0.15;
-    const hipY = HIP_Y - 0.36 * kk;
+    q1.setFromAxisAngle(this.fallAxis, this.fall - Math.max(0, P.bounce) * 0.5); q2.setFromAxisAngle(v1.set(0, 1, 0), P.yaw);
+    this.tilt.quaternion.copy(q1).multiply(q2);
+    // which way is the floor, seen from the body? (decides how high it lies and where the limbs come to rest)
+    const dn = v5.set(0, -1, 0).applyQuaternion(q3.copy(this.tilt.quaternion).invert());
+    const dnx = dn.x, dnz = dn.z, flat = Math.sin(Math.min(this.fall, Math.PI / 2));
+    this.tilt.position.y = flat * (0.2 - 0.1 * dnz + 0.05 * Math.abs(dnx)) + Math.max(0, P.bounce) * 0.25;
+    const hipY = HIP_Y - P.sink * kk * (1 - 0.8 * flat * flat); // the legs give way, then stretch out as the body goes flat
     this.hips.position.set(0, hipY, -0.1 * kk);
     this.hips.rotation.set(0, 0, 0);
-    this.torso.rotation.x = damp(this.torso.rotation.x, 0.42, 6, dt); this.torso.rotation.z = damp(this.torso.rotation.z, 0.12, 6, dt);
-    this.head.rotation.x = damp(this.head.rotation.x, 0.5, 5, dt); this.head.rotation.z = damp(this.head.rotation.z, 0.3, 5, dt);
+    const fl = P.flail * Math.sin(Math.min(1, this.fall / P.end) * Math.PI) * (down ? 0 : 1), sr = 1 - Math.exp(-6 * dt);
+    this.torso.rotation.x += (P.torsoX * (dnz > 0 ? 0.4 : 1) - fl * 0.25 * P.flZ - this.torso.rotation.x) * sr;
+    this.torso.rotation.y += (P.torsoY - this.torso.rotation.y) * sr; this.torso.rotation.z += (P.torsoZ - this.torso.rotation.z) * sr;
+    const hr = 1 - Math.exp(-5 * dt), hx = P.headX - fl * 0.6 * P.flZ - dnz * 0.25 * flat;
+    this.head.rotation.x += (hx - this.head.rotation.x) * hr; this.head.rotation.y += (P.headY - this.head.rotation.y) * hr; this.head.rotation.z += (P.headZ + fl * 0.5 * P.flX - this.head.rotation.z) * hr;
     for (let i = 0; i < 2; i++) {
       const L = this.leg[i];
-      v4.set(L.s * (HIP_X + 0.06 * kk), 0, (i ? 0.2 : 0.02) * kk); L.foot.lerp(v4, 1 - Math.exp(-10 * dt));
+      v4.set(L.s * (HIP_X + P.legX[i] * kk) + dnx * 0.05 * flat, P.legY[i] * kk * flat, P.legZ[i] * kk + dnz * 0.07 * flat - fl * 0.12 * P.flZ); L.foot.lerp(v4, 1 - Math.exp(-10 * dt));
       v3.set(L.s * HIP_X, hipY - 0.05, -0.1 * kk);
       v4.copy(L.foot); v4.y += ANKLE;
-      v5.set(L.s * (0.2 + 0.5 * kk), 0, 1);
+      v5.set(L.s * (0.2 + 0.12 * kk + 0.9 * flat), 0, 1 - flat * (1 + 0.5 * dnz)); // lying: knees splay sideways, away from the floor
       solveJoint(v3, v4, LEG1, LEG2, v5, v5);
       pointLimb(L.th, v3, v5); pointLimb(L.sh, v5, v4);
       L.ft.position.copy(v4).addScaledVector(DOWN, ANKLE);
+      L.ft.rotation.x = damp(L.ft.rotation.x, 0.5 * flat, 6, dt);
     }
-    for (const A of this.arm) { // arms go slack
-      v4.set(A.s * 0.34, 0.0, 0.14); A.hand.lerp(v4, 1 - Math.exp(-9 * dt));
+    for (let i = 0; i < 2; i++) { // arms: thrown out against the fall, then slack on the floor
+      const A = this.arm[i], T = P.arm[i];
+      v4.set(T.x - fl * 0.3 * P.flX + dnx * 0.1 * flat, T.y + fl * 0.3, T.z - fl * 0.3 * P.flZ + dnz * 0.13 * flat);
+      A.hand.lerp(v4, 1 - Math.exp(-9 * dt));
       solveJoint(A.S, A.hand, ARM1, ARM2, A.pole, v5);
       v3.copy(A.S); pointLimb(A.up, v3, v5); pointLimb(A.lo, v5, A.hand);
     }

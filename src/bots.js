@@ -12,8 +12,20 @@ import { Bot } from './bots/bot.js';
 //   src/bots/body.js     the android mesh + procedural animation
 //   src/bots/bot.js      one bot: movement, senses, state machine, aim, fire
 //
-// ctx.bots = { list, setCount(n), config, nav, pois, stats, alertAll(pos) }
-// Events emitted: shot, impact, botSpawned, botDied, botDamaged, guardSuspicious, guardAlert.
+// ctx.bots = { list, setCount(n), config, nav, pois, stats, alertAll(pos), respawnAll(),
+//              setAggression(level 0..1), aggression (getter), hunt(pos, n) -> number of guards sent }
+// Events emitted: shot, impact, botSpawned, guardSuspicious, guardAlert,
+//   botDamaged   { bot, amount, hp, from, headshot, dir, zone }   zone 'head'|'torso' ('leg' only when the caller passed
+//                info.point to takeDamage; otherwise leg hits are resolved a moment later from the 'impact' event -> bot.slowT > 0)
+//   botDied      { bot, point, by, headshot, dir, force:0..1.4, style, weapon, explosive }
+//                style: 'topple'|'crumple'|'snapback'|'slump'|'spin'|'blown'|'tumble'|'thrown'
+//   botStagger   { bot, point, strength:0.2..1.5, dir, headshot }      a guard lost its balance (fire and movement interrupted)
+//   botSuppressed{ bot, level }                                         near misses made a guard duck
+//   botTell      { bot, time:seconds until the first round, kind }      a guard raised its weapon to fire a burst
+//   botCallout   { bot, kind }   bark cue, rate-limited. kind: 'contact'|'hit'|'wounded'|'suppressed'|'cover'|'reloading'|
+//                                'flank'|'push'|'lost'|'hunt'|'manDown'
+// Per bot (read-only for others): stagT (s of stagger left), slowT (limping), duckT, suppression (0..1.5), telling,
+//   defensive, hunting, deathStyle; methods stagger(strength, dir?, headshot?, point?), suppress(n), huntTo(pos, noise).
 // Team mode (config.ffa = false): each bot exposes role, post, awareness, alertState, lastSeenPlayerT.
 // =============================================================================
 
@@ -27,6 +39,20 @@ export function init(ctx) {
     ctx, cfg, nav, bots: [], attackers: new Set(), time: 0,
     stats: { navBuildMs: buildMs, updateMs: 0, avgMs: 0, maxMs: 0, frames: 0, rays: 0, shots: 0, hits: 0 },
     pois: [], stuckLog: [],
+    aggr: 0, campT: 0, anchor: new THREE.Vector3(0, -999, 0), lastContactT: -999, calloutT: -99, calloutK: {},
+    // audio / UI cue for a guard's bark; rate-limited so that a firefight does not flood it
+    callout(bot, kind) {
+      const now = mgr.time;
+      if (cfg.ffa || now - mgr.calloutT < cfg.calloutInterval || now - (mgr.calloutK[kind] ?? -99) < 5) return;
+      mgr.calloutT = now; mgr.calloutK[kind] = now;
+      events.emit('botCallout', { bot, kind });
+    },
+    allyDown(bot) { // the nearest living guard within 25 m reacts to a death
+      let best = null, bd = 25;
+      for (const o of mgr.bots) { if (o === bot || !o.alive) continue; const d = o.pos.distanceTo(bot.pos); if (d < bd) { bd = d; best = o; } }
+      if (best) mgr.callout(best, 'manDown');
+    },
+    flankers() { let n = 0; for (const b of mgr.bots) if (b.alive && b.flankUntil > mgr.time) n++; return n; },
     someoneWaiting(self) { for (const b of mgr.bots) if (b !== self && b.alive && !b.hasToken && mgr.time - b.wantTokenT < 0.6) return true; return false; },
     callOut(bot, pos) {
       for (const o of mgr.bots) {
@@ -114,7 +140,7 @@ export function init(ctx) {
   function assignRole(bot) {
     if (cfg.ffa) { bot.role = 'active'; return; }
     let n = 0, p = 0; for (const b of mgr.bots) if (b !== bot && b.alive) { n++; if (b.role === 'passive') p++; }
-    bot.role = (p + 1) / (n + 1) <= cfg.passiveShare + 1e-6 ? 'passive' : 'active';
+    bot.role = (p + 1) / (n + 1) <= cfg.passiveShare * (1 - 0.75 * mgr.aggr) + 1e-6 ? 'passive' : 'active'; // late raid: fewer guards stay at a post
   }
   // a post for a passive guard: a spot in / on a building, away from and unseen by the player
   function findPost() {
@@ -158,12 +184,29 @@ export function init(ctx) {
     if (mgr.time - b.hearLosT > 0.5) { b.hearLosT = mgr.time; he.set(b.pos.x, b.pos.y + 1.6, b.pos.z); hp2.set(pos.x, pos.y, pos.z); b.hearLos = world.lineOfSight(he, hp2); mgr.stats.rays++; }
     return b.hearLos;
   }
+  // rounds passing close to a guard suppress it (player's bullets only; pure math, no rays)
+  function nearMisses(e) {
+    const o = e.origin, dirs = e.dirs || (e.dir ? [e.dir] : null); if (!dirs) return;
+    const R2 = cfg.suppressRadius * cfg.suppressRadius;
+    for (const b of mgr.bots) {
+      if (!b.alive) continue;
+      const vx = b.pos.x - o.x, vy = b.pos.y + 1.2 - o.y, vz = b.pos.z - o.z, l2 = vx * vx + vy * vy + vz * vz;
+      if (l2 > 90 * 90 || l2 < 1) continue;
+      let n = 0;
+      for (let i = 0; i < dirs.length; i++) { const d = dirs[i], t = vx * d.x + vy * d.y + vz * d.z; if (t > 0) { const p2 = l2 - t * t; if (p2 < R2 && p2 > 0.2) n++; } }
+      if (n) b.suppress(n);
+    }
+  }
   events.on('shot', (e) => {
     if (!e.origin) return;
+    if (!cfg.ffa && !e.projectile && isPlayer(e.by)) nearMisses(e);
     if (cfg.ffa) { if (e.by) hearAll(e.origin, cfg.hearShotDist, e.origin, e.by); return; }
     const A = cfg.hearAwareness;
     if (isPlayer(e.by)) { const r = cfg.hearShotDist * (e.suppressed ? cfg.suppressedHearMult : 1); guards((b) => { if (heardShot(b, e.origin, r)) b.hear(e.origin, A.shot, 'shot', cfg.suspiciousAt + 0.1); }); }
     else if (e.by && e.by.isBot) guards((b) => { if (b !== e.by && b.state !== 'combat' && b.pos.distanceTo(e.origin) < cfg.hearAllyShotDist) b.hear(e.origin, A.allyShot, 'shot', cfg.suspiciousAt + 0.05); });
+  });
+  events.on('impact', (e) => { // where exactly a guard was hit (zone, side) — refines the reaction takeDamage started
+    const t = e.target; if (e.kind === 'flesh' && t && t.isBot && t.hitAt && e.point && e.by !== t) t.hitAt(e.point, e.damage || 0, !!e.headshot);
   });
   events.on('impact', (e) => {
     if (!e.point || e.kind !== 'world') return;
@@ -198,6 +241,29 @@ export function init(ctx) {
     list: mgr.bots, setCount, config: cfg, nav, pois: mgr.pois, stats: mgr.stats, stuckLog: mgr.stuckLog,
     alertAll(pos) { for (const b of mgr.bots) if (b.alive) b.alert(pos, rand(0.2, 0.8), true); },
     respawnAll() { for (const b of mgr.bots) { if (b.alive) { b.alive = false; b.releaseToken(); b.clearPath(); b.mesh.hide(); } b.pendingSpawn = true; b.spawnT = 0; } },
+    // Raid escalation, 0..1. 0 = the baseline. Rising: shorter reaction times (up to -40 %), guards lose the player's
+    // trail less easily and search longer, more pushing / flanking and sooner, fewer guards hold a post (living
+    // passive guards are released to patrol), idle guards that know roughly where the player is go hunting, and
+    // from 0.75 one more guard may fire at once and positions are shared between guards (with a large error).
+    setAggression(level) {
+      const g = mgr.aggr = Math.max(0, Math.min(1, +level || 0));
+      if (cfg.ffa) return g;
+      const kinds = cfg.kinds || {}; let n = 0, p = 0;
+      for (const b of mgr.bots) if (b.alive) { n++; if (b.role === 'passive') p++; }
+      const keep = Math.ceil(n * cfg.passiveShare * (1 - 0.75 * g));
+      for (const b of mgr.bots) { if (p <= keep) break; if (b.alive && b.role === 'passive' && !(kinds[b.kind] && kinds[b.kind].role === 'passive') && b.state !== 'combat') { b.role = 'active'; p--; } }
+      return g;
+    },
+    get aggression() { return mgr.aggr; },
+    // Send up to n of the nearest living guards (not already fighting) to `pos` as active hunters. They move fast and
+    // search there; they still have to see the player to engage. Returns how many went.
+    hunt(pos, n = 2) {
+      if (!pos) return 0;
+      const c = mgr.bots.filter((b) => b.alive && b.state !== 'combat' && b.state !== 'chase').sort((a, b) => a.pos.distanceToSquared(pos) - b.pos.distanceToSquared(pos));
+      let sent = 0;
+      for (const b of c) { if (sent >= n) break; b.role = 'active'; if (b.huntTo(pos, 2.5)) { if (!sent) mgr.callout(b, 'hunt'); sent++; } }
+      return sent;
+    },
   };
   setCount(cfg.count);
 
@@ -208,6 +274,10 @@ export function init(ctx) {
     nav.update(dt);
     const tNav = performance.now() - t;
     if (mgr.bots.length !== cfg.count) setCount(cfg.count);
+    { // how long has the player stayed in one spot? (guards flank / push a player who settles in)
+      const pp = ctx.player.pos, dx = pp.x - mgr.anchor.x, dz = pp.z - mgr.anchor.z;
+      if (dx * dx + dz * dz > cfg.campRadius * cfg.campRadius || Math.abs(pp.y - mgr.anchor.y) > 4 || !ctx.player.alive) { mgr.anchor.copy(pp); mgr.campT = 0; } else mgr.campT += dt;
+    }
 
     for (const b of mgr.bots) {
       if (!b.alive) {
