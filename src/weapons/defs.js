@@ -7,20 +7,30 @@
 //   modes         fire modes, toggled with B: 'auto' | 'semi' | 'burst'
 //   rpm           rate of fire. burst: { count, rpm, gap } (gap = pause after a burst)
 //   damage        per bullet / per pellet.  headMult: headshot multiplier
+//                 headR: a headshot must also pass within this distance (m) of the target's centre line, so the
+//                 multiplier is earned by aim, not by clipping the top corner of the hit box (omit = any head-height hit)
 //   falloff       [startDist, endDist, multiplierAtEnd]
 //   pellets       bullets per shot (shotgun)
 //   mag/reserve   magazine size / starting+max reserve ammo. killRefund: reserve gained per kill
 //   reload        { type:'mag', time, commit }   commit = fraction of the animation at which ammo is in the gun
+//                   time = the EMPTY reload (mag out, mag in, charge). With `tactical` (a fraction of the same
+//                   timeline, e.g. 0.8) a reload with rounds left skips the charge, ends at that point and keeps
+//                   the round in the chamber (mag + 1). stages: [out, in, charge] = where on the timeline the
+//                   'reloadStage' events fire (they match the viewmodel animation).
 //                 { type:'shell', start, shell, insert, end }  one round at a time, interruptible by firing
 //   equip         raise time when switching to it.  sprintOut: sprint -> can fire delay
 //   mobility      move speed multiplier while held
 //   spread        hip/ads: base cone half-angle (0 = first shot perfectly accurate standing still)
 //                 move: added at walk speed, air: added while airborne, slide: added while sliding
 //                 bloom: added per shot, bloomMax, decay (deg/s), crouch: multiplier while crouched
+//                 delay: seconds after a shot before the bloom starts to decay (default: one shot interval + 0.03)
+//                 adsBloom: share of the bloom that survives while aimed (default 0.4)
 //   recoil        pattern: [up, right] aim kick per shot (the last `loop` entries repeat for long sprays)
 //                 jitter: random +- added to each entry, adsMult/crouchMult: scaling
 //                 snap: how fast the kick is applied (1/s), recover: return speed (1/s), delay: before recovery
+//                 The aim returns to where the spray started unless the player pulled against it.
 //   kick          purely visual: z (viewmodel pushed back, m), rx (muzzle flip, rad), roll (random roll, rad),
+//                 jolt (random sideways / vertical shake of the gun, m),
 //                 cam (camera pitch punch, rad), camRoll, fov (FOV punch, degrees),
 //                 climb (muzzle rise that builds up over a burst and settles, rad per shot), climbMax
 //   eject         spent case: delay after the shot, vel [right, up, back] m/s  (omit for none)
@@ -30,10 +40,13 @@
 //                 adsDist: how far the sight sits from the eye when aimed
 // =============================================================================
 
+// WREN AR-6: the first three rounds kick softly (bursts stay on target), rounds 4-9 climb hard, then the
+// climb flattens and the muzzle walks right (to ~13), left (to ~20), and wanders gently after that.
 const rifleRecoil = [
-  [0.62, 0.05], [0.58, -0.06], [0.56, 0.10], [0.52, 0.16], [0.46, 0.20], [0.40, 0.14], [0.36, -0.06], [0.34, -0.20],
-  [0.32, -0.26], [0.30, -0.22], [0.30, -0.10], [0.28, 0.12], [0.28, 0.24], [0.26, 0.26], [0.26, 0.12], [0.26, -0.12],
-  [0.24, -0.24], [0.24, -0.22], [0.24, 0.04], [0.24, 0.22],
+  [0.34, 0.02], [0.40, -0.03], [0.50, 0.04], [0.62, 0.09], [0.66, 0.13], [0.62, 0.16], [0.56, 0.17], [0.48, 0.17],
+  [0.42, 0.16], [0.36, 0.14], [0.32, 0.10], [0.30, 0.04], [0.28, -0.06], [0.28, -0.15], [0.26, -0.20], [0.26, -0.22],
+  [0.26, -0.21], [0.24, -0.18], [0.24, -0.12], [0.24, -0.04], [0.24, 0.08], [0.24, 0.16], [0.24, 0.18], [0.24, 0.12],
+  [0.24, 0.0], [0.24, -0.12], [0.24, -0.18], [0.24, -0.14],
 ];
 
 export const WEAPONS = [
@@ -41,27 +54,27 @@ export const WEAPONS = [
     // the sidearm you deploy with: crisp and accurate up close, clearly outclassed by everything found later
     id: 'pistol', name: 'MARTLET-9', tag: 'Service pistol', accent: '#e9e3d4',
     modes: ['semi'], rpm: 400,
-    damage: 24, headMult: 1.8, falloff: [15, 40, 0.55], pellets: 1, range: 250,
+    damage: 24, headMult: 2.5, headR: 0.24, falloff: [15, 40, 0.55], pellets: 1, range: 250,
     mag: 15, reserve: 90, killRefund: 15,
-    reload: { type: 'mag', time: 1.2, commit: 0.6 },
-    equip: 0.18, sprintOut: 0.08, mobility: 1.04,
-    spread: { hip: 0.0, ads: 0.0, move: 0.6, air: 1.2, slide: 0.4, bloom: 0.55, bloomMax: 2.4, decay: 11, crouch: 0.7, adsMoveMult: 0.25 },
-    recoil: { pattern: [[1.15, 0.1], [1.05, -0.16], [1.1, 0.2], [1.05, -0.12]], loop: 4, jitter: 0.12, adsMult: 0.8, crouchMult: 0.85, snap: 60, recover: 14, delay: 0.07 },
-    kick: { z: 0.03, rx: 0.085, roll: 0.03, cam: 0.006, camRoll: 0.005, fov: 0.5, climb: 0.012, climbMax: 0.04 },
+    reload: { type: 'mag', time: 1.2, commit: 0.53, tactical: 0.78, stages: [0.1, 0.53, 0.72] },
+    equip: 0.15, sprintOut: 0.07, mobility: 1.04,
+    spread: { hip: 0.0, ads: 0.0, move: 0.6, air: 1.2, slide: 0.4, bloom: 0.55, bloomMax: 2.4, decay: 12, delay: 0.12, crouch: 0.7, adsMoveMult: 0.25, adsBloom: 0.35 },
+    recoil: { pattern: [[1.25, 0.06], [1.1, -0.14], [1.15, 0.16], [1.1, -0.1]], loop: 4, jitter: 0.08, adsMult: 0.8, crouchMult: 0.85, snap: 110, recover: 16, delay: 0.06 },
+    kick: { z: 0.034, rx: 0.1, roll: 0.03, jolt: 0.0025, cam: 0.007, camRoll: 0.005, fov: 0.55, climb: 0.012, climbMax: 0.04 },
     eject: { delay: 0.02, vel: [2.2, 1.9, 0.3] },
-    ads: { fov: 0.85, time: 0.12, move: 1.0, vmFov: 50 },
+    ads: { fov: 0.85, time: 0.11, move: 1.0, vmFov: 50 },
     view: { hip: [0.105, -0.118, 0.35], fov: 60, adsDist: 0.37 }, // held further from the eye when aiming, so the gun covers less of the view
   },
   {
     id: 'rifle', name: 'WREN AR-6', tag: 'Assault carbine', accent: '#22e0c8',
     modes: ['auto', 'burst'], rpm: 640, burst: { count: 3, rpm: 900, gap: 0.15 },
-    damage: 27, headMult: 1.6, falloff: [30, 70, 0.6], pellets: 1, range: 400,
+    damage: 27, headMult: 1.8, headR: 0.24, falloff: [30, 70, 0.6], pellets: 1, range: 400,
     mag: 30, reserve: 180, killRefund: 30,
-    reload: { type: 'mag', time: 1.55, commit: 0.62 },
-    equip: 0.26, sprintOut: 0.11, mobility: 1.0,
-    spread: { hip: 0.0, ads: 0.0, move: 0.9, air: 1.5, slide: 0.5, bloom: 0.26, bloomMax: 2.2, decay: 9, crouch: 0.7, adsMoveMult: 0.2 },
-    recoil: { pattern: rifleRecoil, loop: 10, jitter: 0.05, adsMult: 0.72, crouchMult: 0.85, snap: 55, recover: 11, delay: 0.1 },
-    kick: { z: 0.042, rx: 0.03, roll: 0.026, cam: 0.0045, camRoll: 0.005, fov: 0.7, climb: 0.011, climbMax: 0.07 },
+    reload: { type: 'mag', time: 1.5, commit: 0.57, tactical: 0.8, stages: [0.11, 0.57, 0.71] },
+    equip: 0.22, sprintOut: 0.1, mobility: 1.0,
+    spread: { hip: 0.0, ads: 0.0, move: 0.9, air: 1.5, slide: 0.5, bloom: 0.26, bloomMax: 2.2, decay: 10, crouch: 0.7, adsMoveMult: 0.2, adsBloom: 0.2 },
+    recoil: { pattern: rifleRecoil, loop: 8, jitter: 0.04, adsMult: 0.72, crouchMult: 0.85, snap: 80, recover: 10, delay: 0.11 },
+    kick: { z: 0.044, rx: 0.032, roll: 0.026, jolt: 0.002, cam: 0.0045, camRoll: 0.005, fov: 0.7, climb: 0.011, climbMax: 0.07 },
     eject: { delay: 0.0, vel: [2.6, 1.5, 0.5] },
     ads: { fov: 0.72, time: 0.15, move: 0.82, vmFov: 42 },
     view: { hip: [0.2, -0.195, 0.45], fov: 60, adsDist: 0.165 },
@@ -118,7 +131,7 @@ WEAPONS.push(
     ...base('rifle'), id: 'smg', name: 'FINCH-45', tag: 'Compact carbine', accent: '#ffd166',
     modes: ['auto'], rpm: 900, damage: 17, headMult: 1.5, falloff: [14, 36, 0.5],
     mag: 36, reserve: 216, killRefund: 36,
-    reload: { type: 'mag', time: 1.3, commit: 0.62 },
+    reload: { ...base('rifle').reload, time: 1.3 },
     equip: 0.2, sprintOut: 0.08, mobility: 1.06,
     spread: { ...base('rifle').spread, move: 0.45, air: 0.9, bloom: 0.2 },
     recoil: { ...base('rifle').recoil, pattern: scaleRecoil(base('rifle').recoil.pattern, 0.7) },
@@ -128,7 +141,7 @@ WEAPONS.push(
     ...base('rifle'), id: 'dmr', name: 'HARRIER DMR', tag: 'Marksman rifle', accent: '#9be37a',
     modes: ['semi'], rpm: 300, burst: undefined, damage: 52, headMult: 2.0, falloff: [50, 110, 0.75], range: 500,
     mag: 12, reserve: 72, killRefund: 12,
-    reload: { type: 'mag', time: 1.85, commit: 0.62 },
+    reload: { ...base('rifle').reload, time: 1.85 },
     equip: 0.32, sprintOut: 0.14, mobility: 0.97,
     spread: { ...base('rifle').spread, move: 1.6, air: 2.6, bloom: 0.9, bloomMax: 2.6, decay: 6 },
     recoil: { ...base('rifle').recoil, pattern: [[2.4, 0.2], [2.2, -0.3], [2.3, 0.25]], loop: 3, recover: 8 },
@@ -164,8 +177,10 @@ export const GRENADE = { name: 'PUCK', charges: 2, recharge: 9, throwDelay: 0.13
 
 // Global feel
 export const FEEL = {
-  holster: 0.11,        // time to drop the current weapon when switching
-  fireBuffer: 0.22,     // a click this long before the gun is ready still fires
+  holster: 0.09,        // time to drop the current weapon when switching
+  fireBuffer: 0.2,      // a click this long before the gun is ready still fires
+  reloadCancel: 0.09,   // firing with rounds left aborts a reload before the new magazine is in; the shot follows after this
+  lowAmmo: 0.3,         // 'lowAmmo' events for the last share of a magazine
   walkSpeed: 5.5, sprintSpeed: 8.6,
   hitmarkerTime: 0.22, killMarkerTime: 0.55,
   killFovPunch: 0.12, headshotKillFovPunch: 0.2, // quick zoom-in pop on a kill (degrees)

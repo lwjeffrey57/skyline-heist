@@ -10,7 +10,8 @@ import { redDotLens, scopeLens } from './optics.js';
 //   lens       { kind:'dot'|'scope', mat } optic lens material driven by weapons.js (or null)
 //   body       (scope only) the group hidden while looking through the scope; eyeR = eyepiece lens radius
 //   animate(s, out)   s = { time, cycle (s since last shot), mag, magSize, reserve, heat, trigger 0..1,
-//                           rl: null | { phase, t 0..1, n, pump, to } },  out = { p, r } extra pose offset
+//                           rl: null | { phase, t 0..1, n, pump, to, tac, end } },  out = { p, r } extra pose offset
+//                     (tac = tactical reload: no charge, the animation ends at t = end instead of 1)
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 const seg = (t, a, b) => clamp01((t - a) / (b - a));
@@ -139,17 +140,19 @@ function buildRifle() {
       squeeze(hr.index, s.trigger);
       let magY = 0, hx = 0, hy = 0, hf = 0;
       if (s.rl) {
-        const t = s.rl.t;
-        const tilt = eseg(t, 0, 0.13) * (1 - eseg(t, 0.84, 1));
+        const t = s.rl.t, tac = !!s.rl.tac, end = s.rl.end || 1;
+        const tilt = eseg(t, 0, 0.13) * (1 - eseg(t, end - 0.16, end));
         out.r.z -= 0.42 * tilt; out.r.x += 0.2 * tilt; out.p.y += 0.02 * tilt; out.p.x -= 0.02 * tilt;
         const o = eseg(t, 0.1, 0.24), i = eseg(t, 0.4, 0.58);
         magY = -0.42 * (o - i);
-        out.p.y -= 0.02 * bump(t, 0.1, 0.24);
-        const seat = bump(t, 0.56, 0.66); out.p.y += 0.018 * seat; out.r.x -= 0.04 * seat;
-        const ch = bump(t, 0.7, 0.86);
-        cz = 0.075 * ch; out.p.z += 0.02 * ch; out.r.z += 0.12 * ch;
+        // mag out: the gun dips and rolls as the magazine is stripped; mag in: a firm upward seat
+        const strip = bump(t, 0.1, 0.24); out.p.y -= 0.022 * strip; out.r.z -= 0.05 * strip;
+        const seat = bump(t, 0.55, 0.66); out.p.y += 0.024 * seat; out.r.x -= 0.055 * seat; out.r.z += 0.04 * seat;
+        // charge (empty reload only): handle racked back, the whole gun jolts back and rolls
+        const ch = tac ? 0 : bump(t, 0.7, 0.86), rel = tac ? 0 : bump(t, 0.8, 0.9);
+        cz = 0.075 * ch; out.p.z += 0.024 * ch - 0.012 * rel; out.r.z += 0.14 * ch; out.r.x += 0.03 * rel;
         if (t < 0.62) { const k = eseg(t, 0.02, 0.1) * (1 - eseg(t, 0.58, 0.64)); hf = -0.22 * k; hy = magY * 0.9 - 0.05 * k; hx = 0.04 * k; }
-        else { const k = eseg(t, 0.64, 0.7) * (1 - eseg(t, 0.86, 0.96)); hx = 0.012 * k; hy = 0.045 * k; hf = -0.2 * k - 0.07 * ch; }
+        else if (!tac) { const k = eseg(t, 0.64, 0.7) * (1 - eseg(t, 0.86, 0.96)); hx = 0.012 * k; hy = 0.045 * k; hf = -0.2 * k - 0.07 * ch; }
       }
       chg.position.z = cz; bolt.position.z = cz * 0.8;
       mag.position.y = magY; mag.visible = magY > -0.4;
@@ -537,15 +540,15 @@ function buildPistol() {
       if (s.mag === 0 && !s.rl && s.cycle > 0.035) sz = 0.038;
       let magD = 0, lx = 0, ly = 0, lf = 0;
       if (s.rl) {
-        const t = s.rl.t;
+        const t = s.rl.t, end = s.rl.end || 1;
         if (t < 0.05) wasEmpty = s.mag === 0;
-        const tilt = eseg(t, 0, 0.14) * (1 - eseg(t, 0.82, 1));
+        const tilt = eseg(t, 0, 0.14) * (1 - eseg(t, end - 0.18, end));
         out.r.z -= 0.5 * tilt; out.r.x += 0.3 * tilt; out.p.y += 0.035 * tilt; out.p.x -= 0.02 * tilt;
         const o = eseg(t, 0.08, 0.22), i = eseg(t, 0.36, 0.54);
         magD = o - i;
         out.p.y -= 0.012 * bump(t, 0.08, 0.2);
-        const seat = bump(t, 0.52, 0.62); out.p.y += 0.02 * seat; out.r.x -= 0.05 * seat;
-        if (wasEmpty) { sz = 0.038 * (1 - eseg(t, 0.72, 0.76)); const rel = bump(t, 0.72, 0.84); out.r.x -= 0.04 * rel; out.p.z -= 0.008 * rel; }
+        const seat = bump(t, 0.5, 0.62); out.p.y += 0.026 * seat; out.r.x -= 0.07 * seat; // palm slams the magazine home
+        if (wasEmpty && !s.rl.tac) { sz = 0.038 * (1 - eseg(t, 0.72, 0.76)); const rel = bump(t, 0.72, 0.84); out.r.x -= 0.06 * rel; out.p.z -= 0.012 * rel; out.r.z += 0.05 * rel; }
         const k = eseg(t, 0.03, 0.1) * (1 - eseg(t, 0.6, 0.72));
         lx = -0.01 * k; ly = -0.33 * magD - 0.04 * k; lf = -0.07 * magD - 0.03 * k;
       }

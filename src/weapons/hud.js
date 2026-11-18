@@ -16,8 +16,8 @@ const CSS = `
 #wp-cross .wp-dot{width:2px;height:2px;margin:-1px 0 0 -1px}
 #wp-cross .wp-ring{background:none;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.45),inset 0 0 0 1px rgba(0,0,0,.45)}
 #wp-cross .wp-arc{background:none;border:2px solid transparent;border-radius:50%;box-shadow:none}
-#wp-hit i{position:absolute;width:2px;height:10px;margin:-5px 0 0 -1px;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.45)}
-#wp-hit u{position:absolute;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border:1px solid #ff2a2a;border-radius:50%;opacity:.35}
+#wp-hit i{position:absolute;width:2px;height:8px;margin:-4px 0 0 -1px;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.5);border-radius:1px;will-change:transform}
+#wp-stag{position:absolute;left:50%;top:50%;border:1.5px solid #8fe6ff;border-radius:50%;opacity:0;box-shadow:0 0 0 1px rgba(0,0,0,.35)}
 #wp-rl{position:absolute;left:50%;top:calc(50% + 44px);width:92px;height:4px;margin-left:-46px;background:rgba(0,0,0,.5);opacity:0;transform:skewX(-20deg)}
 #wp-rl div{height:100%;width:100%;background:var(--wp-accent);transform-origin:0 50%;box-shadow:0 0 8px var(--wp-accent)}
 #wp-hint{position:absolute;left:50%;top:calc(50% + 56px);transform:translateX(-50%);font-size:12px;font-weight:700;letter-spacing:3px;text-shadow:0 1px 3px #000;opacity:0;white-space:nowrap}
@@ -85,9 +85,12 @@ export function createHud(ctx, weapons) {
   const dot = el('i', null, cross, 'wp-dot');
   const ring = el('i', null, cross, 'wp-ring');
   const hit = el('div', 'wp-hit', root);
-  // minimal marker: four thin diagonal ticks (white single strokes; red double strokes for a headshot)
+  // minimal marker: four small diagonal ticks (white; red for a headshot). A kill snaps the mark outward and
+  // adds a second, shorter set of ticks outside it (a double X). `hring` is the armour-break / stagger ring (only if enemies emit it).
   const ticks = [0, 1, 2, 3, 4, 5, 6, 7].map(() => el('i', null, hit));
-  const hring = el('u', null, hit);
+  const hring = el('u', 'wp-stag', root);
+  hit.style.opacity = '0';
+  const TA = ticks.map((_, i) => Math.PI / 4 + (i % 4) * Math.PI / 2), TS = TA.map(Math.sin), TC = TA.map(Math.cos);
   const rl = el('div', 'wp-rl', root); const rlFill = el('div', null, rl);
   const hint = el('div', 'wp-hint', root);
 
@@ -106,7 +109,7 @@ export function createHud(ctx, weapons) {
   const grenPips = [];
   const score = createScoreHud(ctx, root);
 
-  const S = { hsT: 9, killHead: false, hitT: 9, hitDur: 0.2, head: false, kill: false, killT: 9, magPop: 0, ghost: 1, hurt: 0, lastMag: -1, lastRes: -1, lastHp: -1, lastName: '', lastMode: '', gap: 20, lastIdx: -1 };
+  const S = { hsT: 9, killHead: false, hitT: 9, hitDur: 0.2, head: false, kill: false, killT: 9, hitOn: false, hitCol: '', hitKill: null, stagT: 9, stagOn: false, stagBreak: false, dry: [], lock: [], magPop: 0, ghost: 1, hurt: 0, lastMag: -1, lastRes: -1, lastHp: -1, lastName: '', lastMode: '', gap: 20, lastIdx: -1 };
   const tx = (e, x, y, extra = '') => { e.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px)${extra}`; };
 
   return {
@@ -114,9 +117,10 @@ export function createHud(ctx, weapons) {
     hit({ headshot, kill }) {
       // a kill marker is never downgraded by a later pellet / splash hit in the same instant
       if (S.kill && S.hitT < 0.12 && !kill) return;
-      S.hitT = 0; S.head = !!headshot; S.kill = !!kill; S.hitDur = kill ? 0.26 : 0.18;
+      S.hitT = 0; S.head = !!headshot; S.kill = !!kill; S.hitDur = kill ? 0.36 : headshot ? 0.2 : 0.16;
       if (headshot) score.headshot(kill); // skull on a headshot kill (scorehud.js)
     },
+    stagger(e) { S.stagT = 0; S.stagBreak = !!(e && (e.armorBreak || e.armourBreak || e.break)); },
     scoreKill(info) { score.kill(info); },
     died() { score.died(); },
     damage(from, amount) {
@@ -146,24 +150,28 @@ export function createHud(ctx, weapons) {
       if (isShot) { const d = gap * 2; ring.style.width = ring.style.height = `${d.toFixed(1)}px`; ring.style.margin = `${(-gap).toFixed(1)}px 0 0 ${(-gap).toFixed(1)}px`; ring.style.opacity = '.55'; }
       // ---- hitmarker ---------------------------------------------------------
       S.hitT += dt; S.killT += dt;
-      const h = Math.min(1, S.hitT / S.hitDur);
-      const ho = S.hitT < S.hitDur ? 1 - h * h : 0;
-      hit.style.opacity = ho.toFixed(2);
-      if (ho > 0) {
-        const nudge = 1 - Math.pow(1 - Math.min(1, S.hitT / 0.07), 2); // instant appear, small outward nudge
-        const r = (S.kill ? 12 : 10) + nudge * 4;
-        const col = S.head ? '#ff2a2a' : S.kill ? '#ff5a4d' : '#fff';
-        const w = S.head ? 1.5 : 2, gap = S.head ? 2.25 : 0;
-        ticks.forEach((t, i) => {
-          const second = i >= 4;
-          if (second && !S.head) { t.style.display = 'none'; return; }
-          t.style.display = '';
-          const a = Math.PI / 4 + (i % 4) * Math.PI / 2, side = second ? -gap : gap;
-          t.style.background = col; t.style.width = `${w}px`; t.style.marginLeft = `${-w / 2}px`;
-          tx(t, Math.sin(a) * r + Math.cos(a) * side, -Math.cos(a) * r + Math.sin(a) * side, ` rotate(${a}rad) scale(1,${S.kill ? 1.2 : 1})`);
-        });
-        hring.style.display = S.head ? '' : 'none';
-      }
+      if (S.hitT < S.hitDur) {
+        // appears at full strength on the frame of the hit; holds, then fades over the last 45%
+        const f = S.hitT / S.hitDur, fade = f < 0.55 ? 1 : 1 - (f - 0.55) / 0.45;
+        hit.style.opacity = fade.toFixed(2); S.hitOn = true;
+        const snap = 1 - Math.pow(1 - Math.min(1, S.hitT / (S.kill ? 0.11 : 0.06)), 3);
+        const r = S.kill ? 9 + snap * 5 : 8 + snap * 2.5, r2 = r + 4 + snap * 6;
+        const col = S.head ? '#ff3b30' : '#fff';
+        if (col !== S.hitCol) { S.hitCol = col; for (let i = 0; i < 8; i++) ticks[i].style.background = col; }
+        if (S.kill !== S.hitKill) { S.hitKill = S.kill; for (let i = 4; i < 8; i++) ticks[i].style.display = S.kill ? '' : 'none'; }
+        const sc = S.kill ? ' scale(1,1.2)' : '';
+        for (let i = 0; i < (S.kill ? 8 : 4); i++) {
+          const rr = i < 4 ? r : r2;
+          ticks[i].style.transform = `translate(${(TS[i] * rr).toFixed(1)}px,${(-TC[i] * rr).toFixed(1)}px) rotate(${TA[i].toFixed(3)}rad)${i < 4 ? sc : ' scale(.75,.6)'}`;
+        }
+      } else if (S.hitOn) { S.hitOn = false; hit.style.opacity = '0'; }
+      // armour break / stagger: one thin ring that opens around the marker
+      S.stagT += dt;
+      if (S.stagT < 0.26) {
+        const f = S.stagT / 0.26, d = (S.stagBreak ? 26 : 22) + (1 - Math.pow(1 - f, 3)) * 12;
+        hring.style.width = hring.style.height = `${d.toFixed(1)}px`; hring.style.margin = `${(-d / 2).toFixed(1)}px 0 0 ${(-d / 2).toFixed(1)}px`;
+        hring.style.opacity = ((1 - f * f) * (st.hidden ? 0 : 0.9)).toFixed(2); hring.style.borderColor = S.stagBreak ? '#ffd23a' : '#8fe6ff'; S.stagOn = true;
+      } else if (S.stagOn) { S.stagOn = false; hring.style.opacity = '0'; }
       score.update(dt, st.comboLeft || 0);
       // ---- reload bar / hints -------------------------------------------------
       rl.style.opacity = st.reload >= 0 ? '1' : '0';
@@ -196,17 +204,21 @@ export function createHud(ctx, weapons) {
       if (st.reserve !== S.lastRes) { S.lastRes = st.reserve; resEl.textContent = st.reserve; }
       S.magPop = Math.max(0, S.magPop - dt * 9);
       magEl.style.transform = `scale(${(1 + S.magPop * 0.13).toFixed(3)})`;
-      barEl.style.transform = `scaleX(${(st.mag / w.mag).toFixed(3)})`;
+      barEl.style.transform = `scaleX(${Math.min(1, st.mag / w.mag).toFixed(3)})`;
       const low = st.mag <= Math.max(1, Math.floor(w.mag * 0.25));
       ammo.className = 'wp-panel' + (st.mag === 0 ? ' wp-empty' : low ? ' wp-low' : '');
       if (st.mode !== S.lastMode) { S.lastMode = st.mode; modeEl.textContent = st.mode.toUpperCase() + (w.modes.length > 1 ? '  [B]' : ''); }
-      st.inv.forEach((v, i) => slotEls[i].classList.toggle('wp-dry', v.mag + v.reserve === 0));
-      st.inv.forEach((v, i) => { slotEls[i].hidden = !!v.locked; });
+      for (let i = 0; i < st.inv.length; i++) {
+        const v = st.inv[i], dry = v.mag + v.reserve === 0, lock = !!v.locked;
+        if (S.dry[i] !== dry) { S.dry[i] = dry; slotEls[i].classList.toggle('wp-dry', dry); }
+        if (S.lock[i] !== lock) { S.lock[i] = lock; slotEls[i].hidden = lock; }
+      }
       while (grenPips.length < st.grenMax) { const i = el('i', null, grenEl); grenPips.push({ i, u: el('u', null, i) }); }
-      grenPips.forEach((g, k) => {
-        g.i.className = k < st.grenades ? 'wp-on' : '';
-        g.u.style.height = k === st.grenades ? `${(st.grenCharge * 100).toFixed(0)}%` : '0';
-      });
+      for (let k = 0; k < grenPips.length; k++) {
+        const g = grenPips[k], cls = k < st.grenades ? 'wp-on' : '', hh = k === st.grenades ? `${(st.grenCharge * 100).toFixed(0)}%` : '0';
+        if (g.c !== cls) { g.c = cls; g.i.className = cls; }
+        if (g.h !== hh) { g.h = hh; g.u.style.height = hh; }
+      }
       // ---- health -------------------------------------------------------------
       const hp = Math.max(0, p.hp), f = Math.min(1, hp / p.maxHp);
       const hpInt = Math.ceil(hp);

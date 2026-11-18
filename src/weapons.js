@@ -8,18 +8,31 @@ import { createCasings } from './weapons/casings.js';
 // Weapons system: gun logic, first-person viewmodel + animation, recoil / camera feel, weapon HUD.
 // All tuning lives in ./weapons/defs.js. Contract: see core.js. Effects and sound are made by other
 // systems from the events emitted here ('shot', 'impact', 'hitmarker', 'explosion', 'reload', ...).
+//
+// Events emitted here (player's guns only):
+//   shot          { weapon, name, origin, dir, dirs, muzzle, by, pellets, suppressed }   (launcher: projectile:true, no dirs)
+//   impact        { point, normal, kind, collider? | target?, damage, by, headshot?, kill?, weapon }
+//   hitmarker     { headshot, kill, damage }            killConfirm { headshot, multi, streak, points, target, weapon }
+//   reload        { weapon, time, tactical, empty }     time = seconds this reload will take
+//   reloadStage   { weapon, stage:'out'|'in'|'charge', tactical }   magazine out / magazine seated / bolt or slide released
+//                 ('charge' only on an empty reload; fired in step with the viewmodel animation)
+//   reloadDone    { weapon, tactical }   ammo is in the gun        reloadCancel { weapon }   aborted by firing / switching
+//   shellInsert   { weapon }             dryFire { weapon }        weaponSwitch { weapon, name }   fireMode { weapon, mode }
+//   lowAmmo       { weapon, frac, left } with every shot from the last 30% of a magazine (frac = rounds left / magazine, 0 = empty)
+// Listened for (optional): botStagger { bot?, by?, armorBreak? } -> small ring on the hit marker.
 
 const D2R = Math.PI / 180;
 const clamp = THREE.MathUtils.clamp, lerp = THREE.MathUtils.lerp;
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
 const easeOut = (x) => 1 - (1 - x) * (1 - x) * (1 - x);
 const smooth = (x) => x * x * (3 - 2 * x);
+const STAGE = ['out', 'in', 'charge'];
 
 class Spring {
   constructor(k, d) { this.k = k; this.d = d; this.x = 0; this.v = 0; }
-  step(dt) {
+  step(dt, target = 0) {
     const n = Math.max(1, Math.ceil(dt / 0.006)), h = dt / n;
-    for (let i = 0; i < n; i++) { this.v += (-this.k * this.x - this.d * this.v) * h; this.x += this.v * h; }
+    for (let i = 0; i < n; i++) { this.v += (-this.k * (this.x - target) - this.d * this.v) * h; this.x += this.v * h; }
     return this.x;
   }
   kick(amount, max = Infinity) { this.x = clamp(this.x + amount, -max, max); }
@@ -59,19 +72,32 @@ export function init(ctx) {
     fireBuf: 0, spread: 0, shots: 0,
     grenades: GRENADE.charges, grenT: 0, throwT: -1, thrown: false,
     lastPitch: player.pitch, lastYaw: player.yaw,
-    bobAmp: 0, scopeKick: 0, ejects: [], trig: 0, lean: 0, leanV: 0,
+    bobAmp: 0, scopeKick: 0, ejects: [], trig: 0, lean: 0, leanV: 0, slideK: 0, zipK: 0,
+    wasAds: false, adsFull: false, clickT: -10,
   };
   const rec = { tp: 0, ty: 0, ap: 0, ay: 0 }; // aim recoil (radians): target / applied. ty > 0 = to the right
   const sp = {
     kz: new Spring(520, 34), krx: new Spring(480, 30), krz: new Spring(380, 24), kry: new Spring(380, 26), // shot kick
+    kx: new Spring(700, 30), ky: new Spring(700, 30), // shot jolt (sideways / vertical shake of the gun)
     climb: new Spring(95, 15), // slow muzzle rise that builds over a burst, then settles
     y: new Spring(190, 17), rx: new Spring(170, 16), rz: new Spring(150, 15), // body motion (jump, land, slide)
     camP: new Spring(420, 30), camY: new Spring(420, 30), camR: new Spring(300, 22), // camera punch
   };
-  const sway = { x: 0, y: 0, rx: 0, ry: 0, rz: 0, mx: 0, mz: 0, vy: 0 };
+  const sway = { x: 0, y: 0, mx: 0, mz: 0, vy: 0 };
+  // look sway: under-damped, so the gun trails a turn and swings a little past centre when the turn stops (weight)
+  const sw = { rx: new Spring(150, 13), ry: new Spring(150, 13), rz: new Spring(110, 11) };
   const shake = { t: 0, amp: 0 };
   const out = { p: new THREE.Vector3(), r: new THREE.Vector3() };
+  // the reload pose that was on screen when a reload ended early (cancelled / cut short by firing): eased out, never popped
+  const carry = { p: new THREE.Vector3(), r: new THREE.Vector3(), lp: new THREE.Vector3(), lr: new THREE.Vector3(), k: 0 };
+  // reused every frame (no per-frame garbage)
+  const animRl = { phase: '', t: 0, n: 0, pump: false, to: 0, tac: false, end: 1 };
+  const animS = { time: 0, cycle: 0, mag: 0, magSize: 0, reserve: 0, heat: 0, rl: null, mode: '', trigger: 0 };
+  const hudS = { w: null, idx: 0, inv: null, mag: 0, reserve: 0, mode: '', spreadPx: 0, ads: 0, adsScope: false, sight: true, reload: -1, sprint: 0, hidden: false, comboLeft: 0, grenades: 0, grenMax: 0, grenCharge: 0, scopePx: null };
+  const scopeS = { x: 0, y: 0, r: 0, a: 0 };
+  const _ev = new THREE.Vector3(), _ep = new THREE.Vector3();
   const cur = () => inv[S.idx];
+  const DIGITS = inv.map((_, i) => 'Digit' + (i + 1));
 
   const hud = createHud(ctx, WEAPONS);
   const casings = createCasings(ctx);
@@ -119,33 +145,68 @@ export function init(ctx) {
     if (i === S.idx && S.pending < 0 || i === S.pending || i < 0 || i >= inv.length) return;
     if (inv[i].locked) return; // not carried right now (raid.js sets this)
     if (i === S.idx) { S.pending = -1; if (S.state === 'holster') { S.state = 'equip'; S.t = (1 - S.t / FEEL.holster) * cur().def.equip * 0.5; } return; }
-    S.pending = i; S.rl = null; S.burstLeft = 0;
+    S.pending = i; endReload(true); S.burstLeft = 0;
     if (instant) { raise(); return; }
     if (S.state !== 'holster') { S.state = 'holster'; S.t = 0; }
   }
   function raise() {
     cur().pose.visible = false;
     S.last = S.idx; S.idx = S.pending; S.pending = -1;
-    S.state = 'equip'; S.t = 0; S.spray = 0; S.bloom = 0; S.rl = null; S.ejects.length = 0;
+    S.state = 'equip'; S.t = 0; S.spray = 0; S.bloom = 0; S.rl = null; carry.k = 0; S.ejects.length = 0;
     rec.tp = rec.ty = rec.ap = rec.ay = 0;
     cur().pose.visible = true;
     events.emit('weaponSwitch', { weapon: cur().def.id, name: cur().def.name });
+  }
+  // a reload ends (finished, cancelled, cut short): whatever pose it was in is eased out by `carry`
+  function endReload(cancelled = false) {
+    if (!S.rl) return;
+    const w = cur();
+    if (cancelled) events.emit('reloadCancel', { weapon: w.def.id });
+    carry.p.copy(carry.lp); carry.r.copy(carry.lr); carry.k = 1;
+    S.rl = null;
   }
   function startReload() {
     const w = cur(), r = w.def.reload;
     if (S.state !== 'ready' || w.mag >= w.def.mag || w.reserve <= 0) return false;
     S.state = 'reload'; S.burstLeft = 0;
+    // tactical reload: rounds left, so one stays chambered (mag + 1) and the charge is skipped
+    const tac = r.type === 'mag' && !!r.tactical && w.mag > 0;
     S.rl = r.type === 'shell' ? { type: 'shell', phase: 'start', t: 0, n: 0, pump: w.mag === 0, done: false, stop: false }
-      : { type: 'mag', phase: 'mag', t: 0, done: false, to: Math.min(w.def.mag, w.mag + w.reserve) };
-    events.emit('reload', { weapon: w.def.id, time: r.type === 'shell' ? r.start + r.shell : r.time });
+      : { type: 'mag', phase: 'mag', t: 0, done: false, to: Math.min(w.def.mag, w.mag + w.reserve), tac, end: tac ? r.tactical : 1, stage: 0 };
+    events.emit('reload', { weapon: w.def.id, time: r.type === 'shell' ? r.start + r.shell : r.time * S.rl.end, tactical: tac, empty: w.mag === 0 });
     return true;
   }
   function updateReload(dt) {
     const w = cur(), r = w.def.reload, rl = S.rl;
     if (rl.type === 'mag') {
+      // a fresh click with rounds in the gun, before the new magazine is seated, aborts the reload and fires
+      const charge = r.stages ? r.stages[2] : Math.min(0.9, r.commit + 0.12);
+      const fireAt = rl.tac ? r.commit + 0.06 : r.stages ? charge + 0.1 : r.commit + 0.12;
+      if (ctx.time - S.clickT < 0.05 && S.fireBuf > 0) { // a fresh click
+        const wait = (fireAt - rl.t) * r.time;
+        // ...when the gun is nearly ready again: kept, and fired the moment it is
+        if (wait < 0.35) S.fireBuf = Math.max(S.fireBuf, wait + 0.06);
+        // ...with rounds still in the gun and the new magazine not close to seated: abort the reload and fire
+        else if (!rl.done && w.mag > 0) {
+          endReload(true); S.state = 'ready';
+          S.nextFire = Math.max(S.nextFire, ctx.time + FEEL.reloadCancel); S.fireBuf = FEEL.reloadCancel + 0.08;
+          return;
+        }
+      }
       rl.t += dt / r.time;
-      if (!rl.done && rl.t >= r.commit) { rl.done = true; const n = Math.min(w.def.mag - w.mag, w.reserve); w.mag += n; w.reserve -= n; events.emit('reloadDone', { weapon: w.def.id }); }
-      if (rl.t >= 1 || (rl.done && S.fireBuf > 0 && rl.t > r.commit + 0.12)) { S.state = 'ready'; S.rl = null; }
+      while (rl.stage < (rl.tac ? 2 : 3)) {
+        const at = r.stages ? r.stages[rl.stage] : rl.stage === 0 ? 0.12 : rl.stage === 1 ? r.commit : charge;
+        if (rl.t < at) break;
+        events.emit('reloadStage', { weapon: w.def.id, stage: STAGE[rl.stage], tactical: rl.tac });
+        rl.stage++;
+      }
+      if (!rl.done && rl.t >= r.commit) {
+        rl.done = true;
+        const n = Math.min(w.def.mag + (rl.tac ? 1 : 0) - w.mag, w.reserve); w.mag += n; w.reserve -= n;
+        events.emit('reloadDone', { weapon: w.def.id, tactical: rl.tac });
+      }
+      // ammo is in: a buffered click cuts the rest of the animation short (after the charge on an empty reload)
+      if (rl.t >= rl.end || (rl.done && S.fireBuf > 0 && rl.t > fireAt)) { S.state = 'ready'; endReload(); }
       return;
     }
     if (S.fireBuf > 0 && w.mag > 0) rl.stop = true; // firing interrupts
@@ -158,7 +219,7 @@ export function init(ctx) {
         if (rl.stop || w.mag >= w.def.mag || w.reserve <= 0) { rl.phase = 'end'; rl.t = rl.stop && !rl.pump ? 0.5 : 0; }
         else { rl.t = 0; rl.done = false; }
       }
-    } else { rl.t += dt / r.end; if (rl.t >= 1 || (rl.stop && !rl.pump && rl.t > 0.6)) { S.state = 'ready'; S.rl = null; } }
+    } else { rl.t += dt / r.end; if (rl.t >= 1 || (rl.stop && !rl.pump && rl.t > 0.6)) { S.state = 'ready'; endReload(); } }
   }
 
   // ---- shooting -------------------------------------------------------------------
@@ -191,12 +252,18 @@ export function init(ctx) {
       events.emit('impact', { point: hit.point, normal: hit.normal.clone(), kind: 'world', collider: hit.collider, damage: dmg, by: player, weapon: w.id });
     } else {
       const t = hit.target;
-      if (hit.headshot) dmg *= w.headMult;
-      t.takeDamage(dmg, { from: origin.clone(), source: player, headshot: hit.headshot, weapon: w.id });
+      let head = !!hit.headshot;
+      if (head && w.headR) {
+        // closest approach of the bullet's line to the target's vertical centre line (seen from above)
+        const ox = t.pos.x - origin.x, oz = t.pos.z - origin.z, dl = Math.hypot(dir.x, dir.z);
+        if (dl > 1e-4 && Math.abs(ox * dir.z - oz * dir.x) / dl > w.headR) head = false;
+      }
+      if (head) dmg *= w.headMult;
+      t.takeDamage(dmg, { from: origin.clone(), source: player, headshot: head, weapon: w.id });
       const kill = !t.alive;
-      events.emit('impact', { point: hit.point, normal: hit.normal.clone(), kind: 'flesh', target: t, damage: dmg, by: player, headshot: hit.headshot, kill, weapon: w.id });
-      agg.hit = true; agg.head = agg.head || hit.headshot; agg.kill = agg.kill || kill; agg.dmg += dmg;
-      if (hit.headshot) agg.heads.add(t);
+      events.emit('impact', { point: hit.point, normal: hit.normal.clone(), kind: 'flesh', target: t, damage: dmg, by: player, headshot: head, kill, weapon: w.id });
+      agg.hit = true; agg.head = agg.head || head; agg.kill = agg.kill || kill; agg.dmg += dmg;
+      if (head) agg.heads.add(t);
       if (kill) agg.kills.push({ target: t, dist: hit.dist });
     }
   }
@@ -251,6 +318,8 @@ export function init(ctx) {
     sp.kz.kick(k.z * a, k.z * 2.2); sp.krx.kick(k.rx * a, k.rx * 2.2);
     sp.krz.kick(side * (0.35 + Math.random() * 0.65) * k.roll, k.roll * 2); sp.kry.kick((Math.random() - 0.5) * k.roll * 0.8, k.roll);
     sp.climb.kick(k.climb * lerp(1, 0.5, S.ads), k.climbMax);
+    if (k.jolt) { const j = k.jolt * lerp(1, 0.35, S.ads); sp.kx.kick((Math.random() - 0.5) * 2 * j, j * 2); sp.ky.kick((0.3 + Math.random() * 0.7) * j, j * 2); }
+    if (it.mag <= w.mag * FEEL.lowAmmo) events.emit('lowAmmo', { weapon: w.id, frac: it.mag / w.mag, left: it.mag });
     if (w.eject) S.ejects.push({ t: ctx.time + w.eject.delay, w });
     S.trig = 1;
     sp.camP.kick(k.cam, k.cam * 2.5); sp.camR.kick((Math.random() - 0.5) * 2 * k.camRoll, k.camRoll * 2);
@@ -301,6 +370,8 @@ export function init(ctx) {
     proj.spawn('frag', start, _dir.clone(), player.vel);
   }
 
+  function stepSlot(from, dir) { for (let k = 1; k < inv.length; k++) { const j = (from + dir * k + inv.length * k) % inv.length; if (!inv[j].locked) return j; } return from; }
+
   // ---- player reactions --------------------------------------------------------
   events.on('jump', () => { sp.y.v -= 0.55; sp.rx.v += 1.1; });
   events.on('land', ({ speed = 6 }) => { const k = clamp(speed / 14, 0.25, 1.4); sp.y.v -= 1.25 * k; sp.rx.v -= 1.6 * k; sp.rz.v += (Math.random() - 0.5) * 1.2 * k; sp.camP.kick(-0.012 * k); });
@@ -313,13 +384,15 @@ export function init(ctx) {
     const k = clamp(amount / 40, 0.2, 1);
     sp.camR.kick((Math.random() - 0.5) * 0.05 * k); sp.camP.kick(0.012 * k); sp.rz.v += (Math.random() - 0.5) * 2 * k;
   });
+  // optional: the enemies system may emit botStagger { bot, by?, armorBreak? } when a hit staggers a guard / breaks armour
+  events.on('botStagger', (e) => { if (e && e.by && e.by !== player) return; if (hud.stagger) hud.stagger(e || {}); });
   events.on('playerRespawned', () => {
     for (const w of inv) { w.mag = w.def.mag; w.reserve = w.def.reserve; }
     S.grenades = GRENADE.charges; S.grenT = 0; S.throwT = -1;
     rec.tp = rec.ty = rec.ap = rec.ay = 0; S.spray = 0; S.bloom = 0; S.ads = 0; S.burstLeft = 0; S.fireBuf = 0;
     S.lastPitch = player.pitch; S.lastYaw = player.yaw;
     const first = Math.max(0, inv.findIndex((v) => !v.locked)); // the first weapon actually carried
-    if (S.idx !== first) { S.pending = first; raise(); } else { S.state = 'equip'; S.t = 0; S.rl = null; }
+    if (S.idx !== first) { S.pending = first; raise(); } else { S.state = 'equip'; S.t = 0; S.rl = null; carry.k = 0; }
   });
 
   cur().pose.visible = true;
@@ -339,12 +412,13 @@ export function init(ctx) {
     if (lookX * rec.ay > 0) { const c = Math.sign(rec.ay) * Math.min(Math.abs(lookX), Math.abs(rec.ay)); rec.ay -= c; rec.ty = Math.abs(rec.ty) > Math.abs(c) && rec.ty * c > 0 ? rec.ty - c : 0; }
 
     // ---- input ---------------------------------------------------------------------
-    if (input.pressed.has('Mouse0')) S.fireBuf = FEEL.fireBuffer; else S.fireBuf -= dt;
-    for (let i = 0; i < inv.length; i++) if (input.pressed.has('Digit' + (i + 1))) switchTo(i);
+    if (input.pressed.has('Mouse0')) { S.fireBuf = FEEL.fireBuffer; S.clickT = time; } else S.fireBuf -= dt;
+    // a click made while the gun is still coming up is kept until it is up
+    if ((S.state === 'equip' || S.state === 'holster') && S.fireBuf > -0.15 && S.fireBuf <= 0.03 && time - S.clickT < 0.4) S.fireBuf = 0.03;
+    if (input.pressed.size) for (let i = 0; i < inv.length; i++) if (input.pressed.has(DIGITS[i])) switchTo(i);
     const tgt = S.pending >= 0 ? S.pending : S.idx;
-    const step = (dir) => { for (let k = 1; k < inv.length; k++) { const j = (tgt + dir * k + inv.length * k) % inv.length; if (!inv[j].locked) return j; } return tgt; };
-    if (input.pressed.has('WheelDown')) switchTo(step(1));
-    if (input.pressed.has('WheelUp')) switchTo(step(-1));
+    if (input.pressed.has('WheelDown')) switchTo(stepSlot(tgt, 1));
+    if (input.pressed.has('WheelUp')) switchTo(stepSlot(tgt, -1));
     if (input.pressed.has('KeyQ')) switchTo(S.last);
     if (input.pressed.has('KeyR')) startReload();
     if (input.pressed.has('KeyB') && w.modes.length > 1) {
@@ -375,18 +449,22 @@ export function init(ctx) {
     const sprinting = sprintInput && !combat && hs > FEEL.walkSpeed + 0.4 && S.state !== 'reload';
     S.sprint = sprinting ? Math.min(1, S.sprint + dt / 0.16) : Math.max(0, S.sprint - dt / w.sprintOut);
     const canAds = adsHeld && (S.state === 'ready' || S.state === 'equip' && S.t > w.equip * 0.5) && player.state !== 'mantle' && S.throwT < 0 && S.sprint < 0.6;
-    S.ads = canAds ? Math.min(1, S.ads + dt / w.ads.time) : Math.max(0, S.ads - dt / (w.ads.time * 0.8));
-    const adsE = smooth(S.ads);
+    // front-loaded and finite: most of the travel happens in the first third of ads.time, in both directions
+    { const T = canAds ? w.ads.time : w.ads.time * 0.8, k = 2.5 / T, c = k / 11.2;
+      S.ads = canAds ? Math.min(1, S.ads + ((1 - S.ads) * k + c) * dt) : Math.max(0, S.ads - (S.ads * k + c) * dt); }
+    if (canAds !== S.wasAds) { S.wasAds = canAds; sp.krz.kick(canAds ? -0.03 : 0.022); sp.y.v += canAds ? 0.12 : -0.1; }
+    if ((S.ads >= 1) !== S.adsFull) { S.adsFull = S.ads >= 1; if (S.adsFull) { sp.krx.kick(-0.009); sp.kz.kick(0.004); } }
+    const adsE = S.ads;
     S.lower = damp(S.lower, player.state === 'mantle' ? 1 : 0, 16, dt);
 
     // ---- spread ----------------------------------------------------------------------------
     const s = w.spread;
-    if (time - S.lastShot > 60 / w.rpm + 0.03) S.bloom = Math.max(0, S.bloom - s.decay * dt);
+    if (time - S.lastShot > (s.delay ?? 60 / w.rpm + 0.03)) S.bloom = Math.max(0, S.bloom - s.decay * dt);
     if (time - S.lastShot > w.recoil.delay + 0.18 && S.burstLeft <= 0) S.spray = 0;
     const air = !player.grounded && player.state === 'normal';
     let spread = lerp(s.hip, s.ads, adsE)
       + ((hs > 0.6 ? s.move * Math.min(1.5, hs / FEEL.walkSpeed) : 0) + (air ? s.air : 0) + (player.sliding ? s.slide : 0)) * lerp(1, s.adsMoveMult, adsE)
-      + S.bloom * lerp(1, 0.4, adsE);
+      + S.bloom * lerp(1, s.adsBloom ?? 0.4, adsE);
     if (player.crouching && player.grounded && !player.sliding) spread *= s.crouch;
     S.spread = spread;
 
@@ -435,9 +513,9 @@ export function init(ctx) {
       if (!it.vm.eject || e.w !== w) continue;
       camera.updateMatrixWorld(true);
       aimBasis();
-      const v = e.w.eject.vel, j = () => 0.75 + Math.random() * 0.5;
-      const vel = new THREE.Vector3().addScaledVector(_right, v[0] * j()).addScaledVector(_up, v[1] * j()).addScaledVector(_dir, -v[2] * j()).add(player.vel);
-      casings.spawn(it.vm.eject.getWorldPosition(new THREE.Vector3()), vel, e.w.id);
+      const v = e.w.eject.vel;
+      _ev.set(0, 0, 0).addScaledVector(_right, v[0] * (0.75 + Math.random() * 0.5)).addScaledVector(_up, v[1] * (0.75 + Math.random() * 0.5)).addScaledVector(_dir, -v[2] * (0.75 + Math.random() * 0.5)).add(player.vel);
+      casings.spawn(it.vm.eject.getWorldPosition(_ep), _ev, e.w.id);
     }
     casings.update(dt);
     S.trig = input.down('Mouse0') && S.state === 'ready' && it.mag > 0 && it.mode === 'auto' ? Math.max(S.trig, 0.7) : Math.max(0, S.trig - dt * 9);
@@ -449,9 +527,9 @@ export function init(ctx) {
     const hipK = 1 - 0.85 * adsE; // how much loose motion survives while aiming
     // sway: the gun lags behind the look direction
     const rx = lookX / dt, ry = lookY / dt;
-    sway.ry = damp(sway.ry, clamp(-rx * 0.022, -0.09, 0.09), 14, dt);
-    sway.rx = damp(sway.rx, clamp(-ry * 0.022, -0.07, 0.07), 14, dt);
-    sway.rz = damp(sway.rz, clamp(rx * 0.03, -0.12, 0.12), 10, dt);
+    sw.ry.step(dt, clamp(-rx * 0.024, -0.1, 0.1));
+    sw.rx.step(dt, clamp(-ry * 0.024, -0.08, 0.08));
+    sw.rz.step(dt, clamp(rx * 0.032, -0.13, 0.13));
     sway.x = damp(sway.x, clamp(rx * 0.004, -0.02, 0.02), 12, dt);
     sway.y = damp(sway.y, clamp(-ry * 0.004, -0.02, 0.02), 12, dt);
     // movement: lean against strafing, lag on vertical speed
@@ -472,11 +550,15 @@ export function init(ctx) {
     const bobX = Math.cos(ph) * 0.0085 * bA, bobY = -Math.abs(Math.sin(ph)) * 0.011 * bA + 0.005 * bA, bobR = Math.cos(ph) * 0.012 * bA;
     const breathe = Math.sin(time * 1.7) * 0.0022, breathe2 = Math.sin(time * 1.1 + 1) * 0.0016;
     const slide = player.sliding ? 1 : 0, zip = player.state === 'zip' ? 1 : 0;
-    S.slideK = damp(S.slideK || 0, slide, 12, dt); S.zipK = damp(S.zipK || 0, zip, 10, dt);
+    S.slideK = damp(S.slideK, slide, 12, dt); S.zipK = damp(S.zipK, zip, 10, dt);
 
     out.p.set(0, 0, 0); out.r.set(0, 0, 0);
-    const rlInfo = S.rl ? { phase: S.rl.phase, t: Math.min(1, S.rl.t), n: S.rl.n, pump: S.rl.pump, to: S.rl.to } : null;
-    it.vm.animate({ time, cycle: time - S.lastShot, mag: it.mag, magSize: w.mag, reserve: it.reserve, heat: S.heat, rl: rlInfo, mode: it.mode, trigger: S.trig }, out);
+    if (S.rl) { const a = animRl, l = S.rl; a.phase = l.phase; a.t = Math.min(1, l.t); a.n = l.n; a.pump = l.pump; a.to = l.to; a.tac = !!l.tac; a.end = l.end || 1; }
+    animS.time = time; animS.cycle = time - S.lastShot; animS.mag = it.mag; animS.magSize = w.mag; animS.reserve = it.reserve; animS.heat = S.heat;
+    animS.rl = S.rl ? animRl : null; animS.mode = it.mode; animS.trigger = S.trig;
+    it.vm.animate(animS, out);
+    carry.lp.copy(out.p); carry.lr.copy(out.r);
+    if (carry.k > 0) { carry.k = Math.max(0, carry.k - dt / 0.12); const e = smooth(carry.k); out.p.addScaledVector(carry.p, e); out.r.addScaledVector(carry.r, e); }
 
     // equip / holster / grenade throw / lowered
     let drop = S.lower;
@@ -486,13 +568,13 @@ export function init(ctx) {
 
     const P = it.pose.position, R = it.pose.rotation, se = smooth(S.sprint);
     P.copy(it.hip).lerp(it.adsPos, adsE);
-    P.x += (bobX + sway.x - S.lean * FEEL.strafeShift - S.leanV * FEEL.strafeTrail + breathe2) * hipK + out.p.x - 0.05 * se - 0.03 * th + 0.02 * S.slideK * hipK;
-    P.y += (bobY + sway.y + sway.vy + breathe) * hipK + sp.y.x * (1 - 0.6 * adsE) + out.p.y - 0.045 * se - 0.3 * drop - 0.07 * th - 0.02 * S.slideK * hipK;
+    P.x += sp.kx.x + (bobX + sway.x - S.lean * FEEL.strafeShift - S.leanV * FEEL.strafeTrail + breathe2) * hipK + out.p.x - 0.05 * se - 0.03 * th + 0.02 * S.slideK * hipK;
+    P.y += sp.ky.x + (bobY + sway.y + sway.vy + breathe) * hipK + sp.y.x * (1 - 0.6 * adsE) + out.p.y - 0.045 * se - 0.3 * drop - 0.07 * th - 0.02 * S.slideK * hipK;
     P.z += sp.kz.x + sway.mz * 0.012 * hipK + out.p.z + 0.04 * se + 0.08 * drop;
     R.set(
-      sp.krx.x + sp.climb.x + (sway.rx + sp.rx.x * 0.12) * hipK + out.r.x - 0.2 * se - 0.95 * drop - 0.25 * th,
-      sp.kry.x + sway.ry * hipK + out.r.y + 0.72 * se + 0.3 * drop + 0.35 * th,
-      sp.krz.x + (sway.rz + bobR + S.lean * FEEL.strafeRoll + sp.rz.x * 0.1 + 0.32 * S.slideK - 0.2 * S.zipK) * hipK + out.r.z + 0.18 * se + 0.25 * drop + 0.3 * th,
+      sp.krx.x + sp.climb.x + (sw.rx.x + sp.rx.x * 0.12) * hipK + out.r.x - 0.2 * se - 0.95 * drop - 0.25 * th,
+      sp.kry.x + sw.ry.x * hipK + out.r.y + 0.72 * se + 0.3 * drop + 0.35 * th,
+      sp.krz.x + (sw.rz.x + bobR + S.lean * FEEL.strafeRoll + sp.rz.x * 0.1 + 0.32 * S.slideK - 0.2 * S.zipK) * hipK + out.r.z + 0.18 * se + 0.25 * drop + 0.3 * th,
       'YXZ');
     // viewmodel has its own field of view: counter-scale against the camera's
     const vmFov = lerp(w.view.fov, w.ads.vmFov, adsE);
@@ -517,25 +599,24 @@ export function init(ctx) {
       it.vm.body.visible = !looking; // nothing of the rifle is in focus (or in the way) while the eye is at the glass
       lens.mat.uniforms.uOpen.value = open * (1 - Math.min(0.5, S.scopeKick * 2.5));
       lens.mat.uniforms.uShadow.value.set(
-        clamp(-sway.ry * 7 - sp.kry.x * 6 + sway.mx * 0.06 + Math.sin(time * 0.9) * 0.012, -0.6, 0.6),
-        clamp(sway.rx * 7 + sp.krx.x * 4 + sp.y.x * 3 + sway.vy * 6 + Math.sin(time * 1.3) * 0.01, -0.6, 0.6));
+        clamp(-sw.ry.x * 7 - sp.kry.x * 6 + sway.mx * 0.06 + Math.sin(time * 0.9) * 0.012, -0.6, 0.6),
+        clamp(sw.rx.x * 7 + sp.krx.x * 4 + sp.y.x * 3 + sway.vy * 6 + Math.sin(time * 1.3) * 0.01, -0.6, 0.6));
       if (looking) {
         _m.set(it.vm.sight[0], it.vm.sight[1], -it.vm.sight[2]); it.vm.group.localToWorld(_m); _m.applyMatrix4(camera.matrixWorldInverse);
-        scopePx = { x: (_m.x / -_m.z) * pxPerRad, y: (-_m.y / -_m.z) * pxPerRad, r: (it.vm.eyeR * k / -_m.z) * pxPerRad, a: open };
+        scopePx = scopeS; scopeS.x = (_m.x / -_m.z) * pxPerRad; scopeS.y = (-_m.y / -_m.z) * pxPerRad; scopeS.r = (it.vm.eyeR * k / -_m.z) * pxPerRad; scopeS.a = open;
       }
     }
 
     // ---- HUD -------------------------------------------------------------------------------------
     let reload = -1;
-    if (S.rl) reload = S.rl.type === 'mag' ? S.rl.t : clamp((it.mag + (S.rl.phase === 'loop' && !S.rl.done ? S.rl.t * 0.9 : 0)) / w.mag, 0, 1);
-    hud.update({
-      w, idx: S.idx, inv, mag: it.mag, reserve: it.reserve, mode: it.mode,
-      spreadPx: Math.tan(S.spread * D2R) * pxPerRad, ads: S.ads, adsScope: !!w.ads.scope, sight: w.id !== 'launcher', reload, sprint: S.sprint,
-      hidden: S.state === 'holster' || player.state === 'mantle',
-      comboLeft: 1 - (time - score.lastKillT) / SCORE.multiWindow,
-      grenades: S.grenades, grenMax: GRENADE.charges, grenCharge: S.grenT / GRENADE.recharge,
-      scopePx,
-    }, dt);
+    if (S.rl) reload = S.rl.type === 'mag' ? Math.min(1, S.rl.t / S.rl.end) : clamp((it.mag + (S.rl.phase === 'loop' && !S.rl.done ? S.rl.t * 0.9 : 0)) / w.mag, 0, 1);
+    const h = hudS;
+    h.w = w; h.idx = S.idx; h.inv = inv; h.mag = it.mag; h.reserve = it.reserve; h.mode = it.mode;
+    h.spreadPx = Math.tan(S.spread * D2R) * pxPerRad; h.ads = S.ads; h.adsScope = !!w.ads.scope; h.sight = w.id !== 'launcher'; h.reload = reload; h.sprint = S.sprint;
+    h.hidden = S.state === 'holster' || player.state === 'mantle';
+    h.comboLeft = 1 - (time - score.lastKillT) / SCORE.multiWindow;
+    h.grenades = S.grenades; h.grenMax = GRENADE.charges; h.grenCharge = S.grenT / GRENADE.recharge; h.scopePx = scopePx;
+    hud.update(h, dt);
   }
 
   // public API for other systems / tests

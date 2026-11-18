@@ -6,10 +6,10 @@ const CSS = `
 #wp-hsm,#wp-skull{position:absolute;left:50%;top:50%;width:0;height:0}
 #wp-hsm svg{position:absolute;left:-60px;top:-60px;width:120px;height:120px;overflow:visible}
 #wp-hsm .wp-flash{position:absolute;left:-34px;top:-34px;width:68px;height:68px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.95) 0,rgba(255,225,130,.55) 28%,rgba(255,190,60,0) 70%)}
-#wp-skull{top:calc(50% - 104px)}
-#wp-skull svg{position:absolute;left:-34px;top:-34px;width:68px;height:68px;overflow:visible}
-#wp-skull .wp-burst{position:absolute;border-radius:50%;border:2px solid #ffd23a;box-shadow:0 0 14px rgba(255,190,50,.9),inset 0 0 10px rgba(255,190,50,.5)}
-#wp-skull .wp-rays{position:absolute;left:-70px;top:-70px;width:140px;height:140px;background:conic-gradient(from 0deg,rgba(255,210,58,.0) 0 8deg,rgba(255,210,58,.75) 8deg 12deg,rgba(255,210,58,0) 12deg 53deg,rgba(255,210,58,.75) 53deg 57deg,rgba(255,210,58,0) 57deg 98deg,rgba(255,210,58,.75) 98deg 102deg,rgba(255,210,58,0) 102deg 143deg,rgba(255,210,58,.75) 143deg 147deg,rgba(255,210,58,0) 147deg 188deg,rgba(255,210,58,.75) 188deg 192deg,rgba(255,210,58,0) 192deg 233deg,rgba(255,210,58,.75) 233deg 237deg,rgba(255,210,58,0) 237deg 278deg,rgba(255,210,58,.75) 278deg 282deg,rgba(255,210,58,0) 282deg 323deg,rgba(255,210,58,.75) 323deg 327deg,rgba(255,210,58,0) 327deg 360deg);-webkit-mask:radial-gradient(circle,transparent 0 44%,#000 50%,transparent 70%);mask:radial-gradient(circle,transparent 0 44%,#000 50%,transparent 70%)}
+#wp-skull{top:calc(50% - 62px)}
+#wp-skull svg{position:absolute;left:-17px;top:-17px;width:34px;height:34px;overflow:visible}
+#wp-skull .wp-burst{position:absolute;border-radius:50%;border:1.5px solid #ffd23a;box-shadow:0 0 6px rgba(255,190,50,.7)}
+#wp-skull .wp-rays{display:none;position:absolute;left:-70px;top:-70px;width:140px;height:140px;background:conic-gradient(from 0deg,rgba(255,210,58,.0) 0 8deg,rgba(255,210,58,.75) 8deg 12deg,rgba(255,210,58,0) 12deg 53deg,rgba(255,210,58,.75) 53deg 57deg,rgba(255,210,58,0) 57deg 98deg,rgba(255,210,58,.75) 98deg 102deg,rgba(255,210,58,0) 102deg 143deg,rgba(255,210,58,.75) 143deg 147deg,rgba(255,210,58,0) 147deg 188deg,rgba(255,210,58,.75) 188deg 192deg,rgba(255,210,58,0) 192deg 233deg,rgba(255,210,58,.75) 233deg 237deg,rgba(255,210,58,0) 237deg 278deg,rgba(255,210,58,.75) 278deg 282deg,rgba(255,210,58,0) 282deg 323deg,rgba(255,210,58,.75) 323deg 327deg,rgba(255,210,58,0) 327deg 360deg);-webkit-mask:radial-gradient(circle,transparent 0 44%,#000 50%,transparent 70%);mask:radial-gradient(circle,transparent 0 44%,#000 50%,transparent 70%)}
 #wp-score{position:absolute;left:24px;top:16px;text-shadow:0 1px 3px rgba(0,0,0,.8)}
 #wp-score .wp-sl{font-size:10px;letter-spacing:3px;opacity:.7}
 #wp-score .wp-sn{font-size:32px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:1px;display:inline-block;transform-origin:0 60%}
@@ -132,20 +132,18 @@ export function createScoreHud(ctx, root, SCORE) {
 
       // ---- skull: slam in above the crosshair, hold, then fly into the score
       K.t += dt;
-      if (K.t < 1.05) {
+      if (K.t < 0.8) {
         const t = K.t;
-        const sIn = t < 0.16 ? lerp(2.6, 1, outBack(t / 0.16)) : 1 + 0.03 * Math.sin((t - 0.16) * 18) * (1 - seg(t, 0.16, 0.5));
-        const fly = seg(t, 0.7, 1.05), fe = fly * fly * (3 - 2 * fly);
-        const dx = -(window.innerWidth / 2 - 100) * fe, dy = (-(window.innerHeight / 2 - 36) + 104) * fe;
+        const sIn = t < 0.12 ? lerp(1.7, 1, outBack(t / 0.12)) : 1 + 0.03 * Math.sin((t - 0.16) * 18) * (1 - seg(t, 0.16, 0.5));
+        const fly = seg(t, 0.45, 0.8), fe = fly * fly * (3 - 2 * fly);
+        const dx = -(window.innerWidth / 2 - 100) * fe, dy = (-(window.innerHeight / 2 - 36) + 62) * fe;
         skull.style.opacity = (Math.min(1, t / 0.03) * (1 - Math.pow(fly, 3))).toFixed(2);
         skull.style.transform = `translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px)`;
         skullImg.style.transform = `scale(${(sIn * (1 - 0.72 * fe)).toFixed(3)}) rotate(${((1 - seg(t, 0, 0.16)) * -14).toFixed(1)}deg)`;
-        skullImg.style.filter = `drop-shadow(0 0 ${(6 + 16 * (1 - seg(t, 0, 0.3))).toFixed(0)}px rgba(255,180,40,.95)) drop-shadow(0 2px 2px rgba(0,0,0,.7))`;
-        const b = seg(t, 0.02, 0.4), br = 20 + b * 46;
+        skullImg.style.filter = `drop-shadow(0 0 ${(3 + 7 * (1 - seg(t, 0, 0.3))).toFixed(0)}px rgba(255,180,40,.9)) drop-shadow(0 1px 1px rgba(0,0,0,.7))`;
+        const b = seg(t, 0.02, 0.3), br = 12 + b * 16;
         burst.style.width = burst.style.height = `${(br * 2).toFixed(0)}px`; burst.style.left = burst.style.top = `${(-br).toFixed(0)}px`;
         burst.style.opacity = ((1 - b) * (1 - fly)).toFixed(2);
-        rays.style.opacity = ((1 - seg(t, 0.05, 0.45)) * 0.9).toFixed(2);
-        rays.style.transform = `rotate(${(t * 60).toFixed(1)}deg) scale(${(0.6 + seg(t, 0, 0.3) * 0.75).toFixed(2)})`;
       } else if (skull.style.opacity !== '0') skull.style.opacity = '0';
 
       // ---- score popups: stack beside the crosshair, then feed the total
