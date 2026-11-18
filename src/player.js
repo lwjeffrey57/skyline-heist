@@ -32,6 +32,7 @@ export class Player {
     this.grounded = false; this.sliding = false; this.crouching = false;
     this.state = 'normal'; this.coyote = 0; this.jumpBuffer = 0; this.slideCd = 0; this.mantleCd = 0; this.padCd = 0;
     this.eye = STAND - 0.15; this.stepSmooth = 0; this.dip = 0; this.dipV = 0; this.bob = 0; this.roll = 0; this.strafeLean = 0; this.leanV = 0;
+    this.landGrace = 0; this.sprintT = 0; this.cutJump = false; this.mExit = 4.5;
     this.prompt = '';
     this.hp = this.maxHp; this.alive = true; this.hurtT = 99;
   }
@@ -81,19 +82,20 @@ export class Player {
     return best;
   }
 
-  tryMantle(fx, fz) {
+  // climb onto (or vault over) the ledge in front. maxUp limits how high; entry is the speed you arrived with, which you keep
+  tryMantle(fx, fz, maxUp = 2.5, entry = 0) {
     const p = this.pos, px = p.x + fx * (R + 0.5), pz = p.z + fz * (R + 0.5);
     let best = Infinity;
     for (const c of this.world.near(px - 1, px + 1, pz - 1, pz + 1, this._nA || (this._nA = []))) {
       if (!(px - R < c.max.x && px + R > c.min.x && pz - R < c.max.z && pz + R > c.min.z)) continue;
       const top = c.max.y;
-      if (top <= p.y + STEP || top > p.y + 2.5 || top >= best) continue;
+      if (top <= p.y + STEP || top > p.y + maxUp || top >= best) continue;
       if (this.free(px, top + 0.01, pz, CROUCH) && this.free(p.x, top + 0.01, p.z, CROUCH)) best = top;
     }
     if (best === Infinity) return false;
     this.state = 'mantle';
     this.mFrom = p.clone(); this.mTo = new THREE.Vector3(px, best + 0.01, pz);
-    this.mT = 0; this.mDur = 0.22 + (best - p.y) * 0.09;
+    this.mT = 0; this.mDur = 0.15 + (best - p.y) * 0.075; this.mExit = Math.max(4.5, Math.min(entry * 0.92, 9.5));
     this.h = CROUCH; this.crouching = true; this.sliding = false;
     this.mDir = new THREE.Vector3(fx, 0, fz);
     this.emit('mantle', {});
@@ -138,7 +140,7 @@ export class Player {
       this.pos.z = THREE.MathUtils.lerp(this.mFrom.z, this.mTo.z, e(fwd));
       this.pos.y = THREE.MathUtils.lerp(this.mFrom.y, this.mTo.y, e(up));
       if (t >= 1) {
-        this.state = 'normal'; this.vel.set(this.mDir.x * 4.5, 0, this.mDir.z * 4.5);
+        this.state = 'normal'; this.vel.set(this.mDir.x * this.mExit, 0, this.mDir.z * this.mExit); this.landGrace = 0.15;
         this.grounded = true; this.mantleCd = 0.25;
       }
     } else if (this.state === 'zip') {
@@ -188,27 +190,30 @@ export class Player {
     let hs = Math.hypot(v.x, v.z);
     const sprinting = inp.down('ShiftLeft') && mf > 0 && !this.crouching;
     let jumped = false;
+    const hs0 = hs;
+    this.sprintT = sprinting ? Math.min(1.2, this.sprintT + dt) : Math.max(0, this.sprintT - dt * 3); // a run builds to full stride
+    this.landGrace -= dt;
 
     if (this.grounded) {
       // start / stop sliding (also when landing with crouch held)
       if (!this.sliding && wantCrouch && (!this.crouching || this.justLanded) && hs > 6.2) {
         this.sliding = true; this.emit('slideStart', {});
-        if (this.slideCd <= 0 && hs > 0) { const b = Math.min(hs + 3.2, 13.5) / hs; v.x *= b; v.z *= b; this.slideCd = 1.1; }
+        if (this.slideCd <= 0 && hs > 0) { const b = Math.max(hs, Math.min(hs + 3.4, 13.5)) / hs; v.x *= b; v.z *= b; this.slideCd = 0.9; }
       }
       if (this.sliding && (!wantCrouch || hs < 3.6)) this.sliding = false;
       this.crouching = wantCrouch || this.sliding;
 
       if (this.sliding) {
-        const drop = 4.2 * dt; hs = Math.hypot(v.x, v.z);
+        const drop = 3.3 * dt; hs = Math.hypot(v.x, v.z);
         if (hs > 0) { const k = Math.max(0, hs - drop) / hs; v.x *= k; v.z *= k; }
         // gentle steering: rotate velocity toward the input direction
-        if (wx || wz) { const s = Math.hypot(v.x, v.z); v.x += wx * 6 * dt; v.z += wz * 6 * dt; const n = Math.hypot(v.x, v.z); if (n > 0) { v.x *= s / n; v.z *= s / n; } }
+        if (wx || wz) { const s = Math.hypot(v.x, v.z); v.x += wx * 10 * dt; v.z += wz * 10 * dt; const n = Math.hypot(v.x, v.z); if (n > 0) { v.x *= s / n; v.z *= s / n; } }
       } else {
         hs = Math.hypot(v.x, v.z);
-        if (hs > 0) { const drop = Math.max(hs, 2.2) * 8 * dt; const k = Math.max(0, hs - drop) / hs; v.x *= k; v.z *= k; }
+        if (hs > 0) { const drop = Math.max(hs, 2.2) * (this.landGrace > 0 ? 1 : 8) * dt; const k = Math.max(0, hs - drop) / hs; v.x *= k; v.z *= k; }
         // a body has inertia: backing up and side-stepping are a little slower than running forward
         const dirScale = mf < 0 ? 0.84 : mf === 0 && ms !== 0 ? 0.92 : 1;
-        const max = (this.crouching ? CROUCH_SPEED : sprinting ? SPRINT : WALK) * this.speedScale * dirScale;
+        const max = (this.crouching ? CROUCH_SPEED : sprinting ? SPRINT + (this.sprintT / 1.2) * 0.9 : WALK) * this.speedScale * dirScale;
         const cur = v.x * wx + v.z * wz, add = Math.min(Math.max(0, max - cur), 78 * dt);
         v.x += wx * add; v.z += wz * add;
       }
@@ -216,14 +221,18 @@ export class Player {
       this.crouching = wantCrouch; this.sliding = false;
       // air control: steer freely, but never gain speed beyond what you had
       const before = Math.max(hs, WALK);
-      v.x += wx * 22 * dt; v.z += wz * 22 * dt;
+      v.x += wx * 27 * dt; v.z += wz * 27 * dt;
       const after = Math.hypot(v.x, v.z);
       if (after > before) { v.x *= before / after; v.z *= before / after; }
     }
 
     if (this.jumpBuffer > 0 && (this.grounded || this.coyote > 0)) {
-      v.y = JUMP; this.grounded = false; this.coyote = 0; this.jumpBuffer = 0; jumped = true; this.emit('jump', {});
+      const hop = this.sliding; // jumping out of a slide is a long, low hop that carries the slide's speed
+      v.y = hop ? JUMP * 0.86 : JUMP; this.grounded = false; this.coyote = 0; this.jumpBuffer = 0; jumped = true; this.cutJump = !hop; this.emit('jump', {});
+      if (hop) { const s = Math.hypot(v.x, v.z); if (s > 0 && s < 13.5) { const b = Math.min(s + 0.8, 13.5) / s; v.x *= b; v.z *= b; } }
     }
+    if (this.cutJump && v.y > 0 && !inp.down('Space')) v.y -= GRAVITY * 1.4 * dt; // tap for a short hop, hold for full height
+    if (v.y <= 0 || this.grounded && !jumped) this.cutJump = false;
     v.y -= GRAVITY * dt; if (v.y < -55) v.y = -55;
 
     // body height (only stand up if there is headroom)
@@ -254,7 +263,7 @@ export class Player {
     if (this.grounded) {
       this.coyote = 0.12;
       if (!wasGrounded) {
-        this.justLanded = true; this.emit('land', { speed: fallSpeed });
+        this.justLanded = true; this.landGrace = 0.14; this.emit('land', { speed: fallSpeed });
         this.dipV -= Math.min(fallSpeed, 26) * 0.11;
       }
     } else this.coyote -= dt;
@@ -264,13 +273,15 @@ export class Player {
       for (const p of this.world.pads) {
         if (Math.abs(this.pos.y - p.y) < 0.4 && Math.hypot(this.pos.x - p.x, this.pos.z - p.z) < p.r) {
           v.x = v.x * 0.35 + p.vel.x; v.z = v.z * 0.35 + p.vel.z; v.y = p.vel.y;
-          this.grounded = false; this.coyote = 0; this.sliding = false; this.padCd = 0.4; p.pulse = 1; this.emit('pad', { x: p.x, z: p.z });
+          this.grounded = false; this.coyote = 0; this.sliding = false; this.cutJump = false; this.padCd = 0.4; p.pulse = 1; this.emit('pad', { x: p.x, z: p.z });
         }
       }
     }
 
     // mantle
-    if (!this.grounded && this.blocked && mf > 0 && v.y > -14 && this.mantleCd <= 0) this.tryMantle(fx, fz);
+    if (!this.grounded && this.blocked && mf > 0 && v.y > -14 && this.mantleCd <= 0) this.tryMantle(fx, fz, 2.5, hs0);
+    // vault: sprint into waist-high cover or a window sill and you go straight over it
+    else if (this.grounded && this.blocked && sprinting && hs0 > 6.5 && this.mantleCd <= 0 && this.tryMantle(fx, fz, 1.35, hs0)) this.emit('vault', {});
 
     // ziplines
     const near = this.nearestZip();
