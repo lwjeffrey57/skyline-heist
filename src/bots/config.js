@@ -94,7 +94,7 @@ export const CONFIG = {
   spawnSeparation: 12,      // keep new spawns this far from other bots
 
   // ---- body ---------------------------------------------------------------
-  hp: 120,                  // player rifle does 22 per body shot -> 6 hits
+  hp: 100,                  // four rifle rounds, four pistol rounds, one .50 or one crossbow bolt to the body
   regenDelay: 9,            // seconds without damage before health comes back
   regenRate: 8,             // hp / s
   walkSpeed: 5.5,

@@ -65,7 +65,7 @@ export const WEAPONS = [
     // the sidearm you deploy with: crisp and accurate up close, clearly outclassed by everything found later
     id: 'pistol', name: 'MARTLET-9', tag: 'Service pistol', accent: '#e9e3d4',
     modes: ['semi'], rpm: 400,
-    damage: 24, headMult: 2.5, headR: 0.24, falloff: [15, 40, 0.55], pellets: 1, range: 250,
+    damage: 25, headMult: 2.5, headR: 0.24, falloff: [15, 40, 0.55], pellets: 1, range: 250,
     mag: 15, reserve: 90, killRefund: 15,
     reload: { type: 'mag', time: 1.2, commit: 0.53, tactical: 0.78, stages: [0.1, 0.53, 0.72] },
     equip: 0.15, sprintOut: 0.07, mobility: 1.04,
@@ -85,7 +85,7 @@ export const WEAPONS = [
     equip: 0.22, sprintOut: 0.1, mobility: 1.0,
     spread: { hip: 0.0, ads: 0.0, move: 0.9, air: 1.5, slide: 0.5, bloom: 0.26, bloomMax: 2.2, decay: 10, crouch: 0.7, adsMoveMult: 0.2, adsBloom: 0.2 },
     recoil: { pattern: rifleRecoil, loop: 8, jitter: 0.04, adsMult: 0.72, crouchMult: 0.85, snap: 80, recover: 10, delay: 0.11 },
-    kick: { z: 0.044, rx: 0.032, roll: 0.026, jolt: 0.002, cam: 0.0045, camRoll: 0.005, fov: 0.7, climb: 0.011, climbMax: 0.07 },
+    kick: { z: 0.044, rx: 0.032, roll: 0.026, jolt: 0.002, cam: 0.0055, camRoll: 0.005, fov: 0.85, climb: 0.011, climbMax: 0.07 },
     eject: { delay: 0.0, vel: [2.6, 1.5, 0.5] },
     ads: { fov: 0.72, time: 0.15, move: 0.82, vmFov: 42 },
     view: { hip: [0.2, -0.195, 0.45], fov: 60, adsDist: 0.165 },
@@ -106,10 +106,10 @@ export const WEAPONS = [
   },
   {
     id: 'sniper', name: 'LONGHAND .50', tag: 'Bolt rail rifle', accent: '#ff4d7a',
-    modes: ['semi'], rpm: 50,
+    modes: ['semi'], rpm: 60,
     damage: 100, headMult: 2.2, falloff: [90, 200, 0.85], pellets: 1, range: 600,
     mag: 5, reserve: 30, killRefund: 5,
-    reload: { type: 'mag', time: 2.3, commit: 0.55 },
+    reload: { type: 'mag', time: 2.0, commit: 0.55 },
     equip: 0.42, sprintOut: 0.16, mobility: 0.94,
     spread: { hip: 2.6, ads: 0.0, move: 2.0, air: 3.0, slide: 1.0, bloom: 1.5, bloomMax: 1.5, decay: 3, crouch: 0.6, adsMoveMult: 0.12 },
     recoil: { pattern: [[5.2, 0.6], [5.0, -0.7]], loop: 2, jitter: 0.4, adsMult: 0.8, crouchMult: 0.8, snap: 40, recover: 7, delay: 0.14 },
@@ -140,7 +140,7 @@ const scaleRecoil = (pattern, k) => pattern.map(([u, s]) => [u * k, s * k]);
 WEAPONS.push(
   { // fast, light and weak: wins inside a building, loses across a street
     ...base('rifle'), id: 'smg', name: 'FINCH-45', tag: 'Compact carbine', accent: '#ffd166',
-    modes: ['auto'], rpm: 900, damage: 17, headMult: 1.5, falloff: [14, 36, 0.5],
+    modes: ['auto'], rpm: 900, damage: 20, headMult: 1.5, falloff: [14, 36, 0.5],
     mag: 36, reserve: 216, killRefund: 36,
     reload: { ...base('rifle').reload, time: 1.3 },
     equip: 0.2, sprintOut: 0.08, mobility: 1.06,
@@ -178,7 +178,7 @@ WEAPONS.push(
     modes: ['semi'], rpm: 110,
     damage: 78, headMult: 1.9, headR: 0.24, falloff: [20, 50, 0.6], pellets: 1, range: 250,
     mag: 6, reserve: 36, killRefund: 6,
-    reload: { type: 'mag', time: 2.7, commit: 0.66, stages: [0.14, 0.66, 0.86], dump: true }, // open / rounds in / snapped shut
+    reload: { type: 'mag', time: 2.1, commit: 0.66, stages: [0.14, 0.66, 0.86], dump: true }, // open / rounds in / snapped shut
     equip: 0.24, sprintOut: 0.1, mobility: 1.02,
     spread: { hip: 0.3, ads: 0.0, move: 0.9, air: 1.8, slide: 0.6, bloom: 1.6, bloomMax: 3.0, decay: 6, delay: 0.25, crouch: 0.7, adsMoveMult: 0.3, adsBloom: 0.4 },
     recoil: { pattern: [[4.6, 0.5], [4.4, -0.6], [4.5, 0.4]], loop: 3, jitter: 0.3, adsMult: 0.85, crouchMult: 0.9, snap: 60, recover: 7.5, delay: 0.12 },
@@ -189,9 +189,9 @@ WEAPONS.push(
   { // holds a room: a hundred rounds that get steadier the longer the trigger is held, and everything else is slow
     id: 'lmg', name: 'CORMORANT-100', tag: 'Belt machine gun', accent: '#b7d36a',
     modes: ['auto'], rpm: 700,
-    damage: 24, headMult: 1.5, headR: 0.24, falloff: [35, 80, 0.65], pellets: 1, range: 450,
+    damage: 25, headMult: 1.5, headR: 0.24, falloff: [35, 80, 0.65], pellets: 1, range: 450,
     mag: 100, reserve: 200, killRefund: 25,
-    reload: { type: 'mag', time: 4.4, commit: 0.68, tactical: 0.84, stages: [0.1, 0.68, 0.82] }, // box off / cover shut / charged
+    reload: { type: 'mag', time: 3.4, commit: 0.68, tactical: 0.84, stages: [0.1, 0.68, 0.82] }, // box off / cover shut / charged
     equip: 0.6, sprintOut: 0.24, mobility: 0.86,
     spread: { hip: 1.6, ads: 0.1, move: 1.6, air: 3.0, slide: 1.2, bloom: 0.22, bloomMax: 2.4, decay: 7, crouch: 0.55, adsMoveMult: 0.45, adsBloom: 0.5,
       sustain: { after: 10, bloomMax: 0.5, rate: 0.25 } },
@@ -291,7 +291,7 @@ export const FEEL = {
   lowAmmo: 0.3,         // 'lowAmmo' events for the last share of a magazine
   walkSpeed: 5.5, sprintSpeed: 8.6,
   hitmarkerTime: 0.22, killMarkerTime: 0.55,
-  killFovPunch: 0.12, headshotKillFovPunch: 0.2, // quick zoom-in pop on a kill (degrees)
+  killFovPunch: 0.5, headshotKillFovPunch: 0.9, // quick zoom-in pop on a kill (degrees)
   kickRhythm: 0.14,
   // strafing: the gun rolls against the camera lean and trails sideways (springy: overshoots on stop / reverse)
   strafeRoll: 0.065, strafeShift: 0.013, strafeTrail: 0.0022, strafeSpring: 75, strafeDamp: 9.5,     // every other shot of a spray kicks this much harder / softer

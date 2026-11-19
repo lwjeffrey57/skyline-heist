@@ -78,9 +78,9 @@ const P = {
 // ---- weapon classes --------------------------------------------------------------------------------------
 // star = sprite size (m), spikes/sparks = counts, light = PointLight intensity, tracer [width, speed, length], kick/trauma = tiny (weapons.js owns recoil)
 const CLASS = {
-  rifle:   { star: 0.3, blast: 0, spikes: 3, sparks: 2, gas: 1, light: 70, range: 16, tw: 0.026, ts: 300, tl: 11, kick: 0.0012, trauma: 0, smoke: 0.45 },
-  shotgun: { star: 0.5, blast: 0.75, spikes: 8, sparks: 14, gas: 3, light: 190, range: 20, tw: 0.02, ts: 250, tl: 7, kick: 0.004, trauma: 0.05, smoke: 3 },
-  heavy:   { star: 0.7, blast: 0.6, spikes: 6, sparks: 6, gas: 3, light: 260, range: 24, tw: 0.045, ts: 480, tl: 22, kick: 0.005, trauma: 0.07, smoke: 3 },
+  rifle:   { star: 0.3, blast: 0, spikes: 3, sparks: 2, gas: 1, light: 70, range: 16, tw: 0.04, ts: 300, tl: 11, kick: 0.0012, trauma: 0, smoke: 0.45 },
+  shotgun: { star: 0.5, blast: 0.75, spikes: 8, sparks: 14, gas: 3, light: 190, range: 20, tw: 0.03, ts: 250, tl: 7, kick: 0.004, trauma: 0.05, smoke: 3 },
+  heavy:   { star: 0.7, blast: 0.6, spikes: 6, sparks: 6, gas: 3, light: 260, range: 24, tw: 0.065, ts: 480, tl: 22, kick: 0.005, trauma: 0.07, smoke: 3 },
   grenade: { star: 0, blast: 0.34, spikes: 0, sparks: 2, gas: 2, light: 45, range: 12, tw: 0, ts: 0, tl: 0, kick: 0.003, trauma: 0.03, smoke: 5 },
   bot:     { star: 0.34, blast: 0, spikes: 4, sparks: 2, gas: 0, light: 50, range: 14, tw: 0.034, ts: 220, tl: 9, kick: 0, trauma: 0, smoke: 0.5 },
 };

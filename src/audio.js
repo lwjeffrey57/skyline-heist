@@ -79,12 +79,12 @@ Object.assign(D, {
   rec_shotgun: { gain: 1.4, max: 3, gap: 0.05, send: 0.6, rate: 0.03, pr: 9 },
   rec_heavy: { gain: 1.25, max: 3, gap: 0.05, send: 0.25, rate: 0.03, pr: 9 }, // already has a natural tail
   rec_bot: { gain: 0.7, max: 5, gap: 0.03, ref: 6, send: 0.3, rate: 0.04, pr: 6 },
-  sub_rifle: { gain: 0.8, max: 3, gap: 0.03, send: 0, rate: 0.03, pr: 8 },
-  sub_shotgun: { gain: 0.9, max: 2, gap: 0.05, send: 0, rate: 0.03, pr: 8 },
+  sub_rifle: { gain: 1.0, max: 3, gap: 0.03, send: 0, rate: 0.03, pr: 8 },
+  sub_shotgun: { gain: 1.1, max: 2, gap: 0.05, send: 0, rate: 0.03, pr: 8 },
 });
 Object.assign(D, {
   // own-gun layers
-  sub_heavy: { gain: 1.0, max: 2, gap: 0.05, send: 0, rate: 0.02, pr: 8 },
+  sub_heavy: { gain: 1.2, max: 2, gap: 0.05, send: 0, rate: 0.02, pr: 8 },
   mech_rifle: { gain: 0.2, max: 3, gap: 0.03, send: 0.03, rate: 0.04, pr: 5 },
   mech_pistol: { gain: 0.2, max: 2, gap: 0.03, send: 0.03, rate: 0.04, pr: 5 },
   tail_out: { gain: 0.17, max: 2, gap: 0.16, send: 0.5, rate: 0.05, pr: 4 },   // distant recordings, replayed late and dull

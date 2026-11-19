@@ -4,7 +4,7 @@ import * as THREE from 'three';
 // Emits 'ejectCasing' { position, velocity, weapon } when a casing leaves the gun and
 // 'casingBounce' { position, speed, weapon } the first time it hits the floor.
 
-const MAX = 32, LIFE = 2.6;
+const MAX = 320, LIFE = 150; // spent cases stay where they fell: the floor shows where the fight was
 const KIND = { // length scale, radius scale, colour
   pistol: [0.45, 0.95, 0xd6ad5a], rifle: [1, 1, 0xd6ad5a], sniper: [2.1, 1.45, 0xd6ad5a], shotgun: [1.5, 2.1, 0xb8301f],
   burst_rifle: [1, 1, 0xd6ad5a], burst_pistol: [0.45, 0.95, 0xd6ad5a],
@@ -27,7 +27,7 @@ export function createCasings(ctx) {
 
   function spawn(position, velocity, weapon) {
     const c = items[next]; next = (next + 1) % MAX;
-    c.live = true; c.t = 0; c.pos.copy(position); c.vel.copy(velocity); c.weapon = weapon; c.bounced = 0;
+    c.live = true; c.rest = false; c.t = 0; c.pos.copy(position); c.vel.copy(velocity); c.weapon = weapon; c.bounced = 0;
     c.k = KIND[weapon] || KIND.rifle;
     c.rot.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
     c.spin.set((Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 40);
@@ -43,6 +43,7 @@ export function createCasings(ctx) {
       c.t += dt;
       if (c.t > LIFE) { c.live = false; mesh.setMatrixAt(i, zero); continue; }
       active++;
+      if (c.rest && LIFE - c.t > 0.25) continue;
       c.vel.y -= 14 * dt; c.pos.addScaledVector(c.vel, dt);
       const r = 0.006 * c.k[1];
       if (c.pos.y < c.floor + r && c.vel.y < 0) {
@@ -50,7 +51,7 @@ export function createCasings(ctx) {
         if (c.bounced === 0) ctx.events.emit('casingBounce', { position: c.pos.clone(), speed: -c.vel.y, weapon: c.weapon });
         c.bounced++;
         if (-c.vel.y > 0.6) { c.vel.y *= -0.38; c.vel.x *= 0.6; c.vel.z *= 0.6; c.spin.multiplyScalar(0.5); }
-        else { c.vel.set(0, 0, 0); c.spin.set(0, 0, 0); c.rot.x = Math.PI / 2; c.rot.z = 0; }
+        else { c.vel.set(0, 0, 0); c.spin.set(0, 0, 0); c.rot.x = Math.PI / 2; c.rot.z = 0; c.rest = true; }
       }
       c.rot.addScaledVector(c.spin, dt);
       const fade = Math.min(1, (LIFE - c.t) / 0.25);

@@ -133,9 +133,24 @@ function step(dt) {
   }
 }
 
+// Emphasis: a few frames of freeze on a kill (the view still turns with the mouse), a short slow-motion beat on the big moments.
+let stopT = 0, slowT = 0, slowK = 1;
+ctx.hitstop = (sec) => { stopT = Math.max(stopT, Math.min(0.12, sec)); };
+ctx.slowmo = (k, sec) => { slowK = k; slowT = Math.max(slowT, sec); };
+const HEAVY_GUN = /LONGHAND|ROOK|KESTREL|NIGHTJAR|BRAMBLE|HARRIER|DOORKNOCKER|PUCK/;
+ctx.events.on('killConfirm', (e) => {
+  const heavy = HEAVY_GUN.test(e.weapon || '');
+  ctx.hitstop((e.headshot ? 0.06 : 0.035) + (heavy ? 0.03 : 0));
+  if ((e.target && e.target.hvt) || e.multi >= 3) ctx.slowmo(0.3, 0.4);
+});
+ctx.events.on('hitmarker', (e) => { if (!e.kill && (e.damage || 0) >= 60) ctx.hitstop(0.022); }); // a big round landing, not automatic fire
+ctx.events.on('raidEnd', () => { stopT = 0; slowT = 0; });
+
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.05); last = now;
-  if (playing) step(dt); else if (!window.__test) player.update(0);
+  let gdt = dt;
+  if (stopT > 0) { stopT -= dt; gdt = dt * 0.03; } else if (slowT > 0) { slowT -= dt; gdt = dt * (slowT < 0.12 ? slowK + (1 - slowK) * (1 - slowT / 0.12) : slowK); }
+  if (playing) step(gdt); else if (!window.__test) player.update(0);
   if (frameN++ % 20 === 0) world.updateLOD(camera.position);
   view.update(dt, player);
   view.render(dt);

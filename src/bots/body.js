@@ -302,6 +302,7 @@ export class BotBody {
   // side (-1..1): where across the body the round landed (+ = its left) -> the torso twists away from it
   // zone: 'torso' | 'head' | 'leg'
   flinch(lx, lz, strength = 1, side = 0, zone = 'torso') {
+    this.flashT = 0.1; // the whole body blinks white for a few frames: every hit reads, even at range
     const k = zone === 'leg' ? 0.45 : 1;
     this.flPV = clamp(this.flPV + lz * 5.5 * strength * k, -11, 11); this.flRV = clamp(this.flRV - lx * 5.5 * strength * k, -11, 11);
     this.flYV = clamp(this.flYV + side * -lz * 9 * strength * k + side * 2 * strength, -12, 12);
@@ -375,6 +376,7 @@ export class BotBody {
   // s: { pos, bodyYaw, aimYaw, aimPitch, vel, grounded, aiming (0..1 target), hp01, showBar, camera, floorY,
   //      stag (0..1 staggered), crouch (0..1 ducked), tell (0..1 about to fire / firing), limp (0..1 hurt leg) }
   update(dt, s) {
+    if (this.flashT > 0 || this.flashOn) { this.flashT -= dt; const f = Math.max(0, this.flashT / 0.1) * 0.75; this.flashOn = f > 0; for (const k of ['suit', 'armor', 'plate', 'cloth', 'cloth2']) { const m = this.mats[k]; if (m) m.emissive.setScalar(f); } }
     const root = this.root;
     // smooth the vertical snap of stair steps
     if (this.visY === null || Math.abs(this.visY - s.pos.y) > 0.7) this.visY = s.pos.y;
@@ -493,6 +495,7 @@ export class BotBody {
   phase0() { return this._p0 ?? (this._p0 = Math.random() * 10); }
 
   updateDeath(dt, s) {
+    if (this.flashT > 0 || this.flashOn) { this.flashT -= dt; const f = Math.max(0, this.flashT / 0.1) * 0.75; this.flashOn = f > 0; for (const k of ['suit', 'armor', 'plate', 'cloth', 'cloth2']) { const m = this.mats[k]; if (m) m.emissive.setScalar(f); } }
     this.deadT += dt; const t = this.deadT, P = this.dp;
     // legs give way first (sink), then the body goes over like an inverted pendulum about a randomised axis,
     // twisting about its own length (yaw) as it falls

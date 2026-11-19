@@ -62,17 +62,18 @@ export function init(ctx) {
       events.emit('melee', { hit: false }); return;
     }
     const unaware = o.alertState === 'unaware' || (o.alertState == null && (o.awareness || 0) < 0.3);
-    const takedown = unaware && !o.isTurret && o.kind !== 'drone'; // they never saw it coming
+    const finisher = !unaware && o.stagT > 0 && !o.hvt && !o.isTurret && o.kind !== 'drone'; // reeling from a hit: close in and finish it
+    const takedown = (unaware || finisher) && !o.isTurret && o.kind !== 'drone'; // they never saw it coming
     const dmg = takedown ? Math.max(9999, o.hp + 1) : CFG.damage, before = o.hp;
     tp.set(o.pos.x, o.pos.y + (o.height || 1.6) * 0.6, o.pos.z);
     const point = tp.clone().addScaledVector(fwd, -(o.radius || 0.4)), dir = fwd.clone();
-    const res = o.takeDamage(dmg, { source: player, from: eye.clone(), point, dir, weapon: 'melee', headshot: false, silent: takedown });
+    const res = o.takeDamage(dmg, { source: player, from: eye.clone(), point, dir, weapon: 'melee', headshot: false, silent: takedown && !finisher });
     if (res === 'blocked') { sound('hit'); events.emit('melee', { hit: false, blocked: true, target: o }); return; } // the blade rings off a shield
     const kill = !o.alive;
     events.emit('impact', { point, normal: dir.clone().negate(), kind: 'flesh', target: o, damage: Math.min(dmg, before), by: player, headshot: false, kill, weapon: 'melee' });
     events.emit('hitmarker', { headshot: false, kill, damage: Math.min(dmg, before) });
     events.emit('melee', { hit: true, takedown, target: o, kill });
-    if (takedown && ctx.raid && ctx.raid.toast) ctx.raid.toast('Silent takedown', '#8ff0c8');
+    if (takedown && ctx.raid && ctx.raid.toast) ctx.raid.toast(finisher ? 'Finisher' : 'Silent takedown', finisher ? '#ffb347' : '#8ff0c8');
     if (player.dipV != null) player.dipV -= 0.5;
     sound('hit');
   }
