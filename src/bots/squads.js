@@ -73,7 +73,10 @@ export function createSquads(mgr, hooks) {
     const gateSquads = gates.map(([x, z], i) => gate(x, z, 'gate' + i));
     const towers = world.buildings.filter((b) => b.tower && !b.hq).map((b, i) => bldg(b, 'tower' + i));
     world.buildings.filter((b) => b.hq).forEach((b, i) => posts.push(bldg(b, 'hq' + i))); // every wing of the campus is always held
-    posts.push(outSquads[0], outSquads[1], gateSquads[0], outSquads[2], gateSquads[1], outSquads[3], outSquads[4], gateSquads[2], gateSquads[3], towers[0], towers[1], gateSquads[4], gateSquads[5], towers[2], towers[3]);
+    // sentries on the inner wall's walkway, where the map has one: a pair over a gate, looking out over the approach
+    const wallSquads = (world.ramparts || []).map((pair, i) => { const q = squad('post', 'rampart' + i); for (const [x, y, z, yaw] of pair) slot(q, x, y, z, yaw); return q; });
+    posts.push(...wallSquads.slice(0, 2));
+    posts.push(outSquads[0], outSquads[1], gateSquads[0], outSquads[2], gateSquads[1], outSquads[3], outSquads[4], gateSquads[2], gateSquads[3], towers[0], towers[1], ...wallSquads.slice(2), gateSquads[4], gateSquads[5], towers[2], towers[3]);
     // patrol routes
     const inner = [], outer = [];
     const pt = (list, x, z) => { const id = nodeNear(x, 0, z, 8, 1.2); if (id >= 0) { nav.nodePos(id, V); list.push({ x: V.x, y: V.y, z: V.z }); } };

@@ -224,7 +224,7 @@ export function createWorld(scene, renderer) {
 
   const blocked = (x0, x1, z0, z1, m, ignore) => colliders.some((c) => c.tag !== 'ground' && c.tag !== ignore && x0 - m < c.max.x && x1 + m > c.min.x && z0 - m < c.max.z && z1 + m > c.min.z);
   const outbuildings = [], roads = [], compoundWalls = [], towerZips = [];
-  const spawnPoints = [], exitPoints = [], gates = [], PADS = [], ZIPS = [];
+  const spawnPoints = [], exitPoints = [], gates = [], ramparts = [], PADS = [], ZIPS = [];
   const road = (x, z, wd, dp) => { roads.push([x - wd / 2, x + wd / 2, z - dp / 2, z + dp / 2]); addBox(x, 0.004, z, wd, 0.012, dp, M.concreteDark, { solid: false, shadow: false }); };
   const onRoad = (x0, x1, z0, z1) => roads.some(([a, b, c, d]) => x0 < b && x1 > a && z0 < d && z1 > c);
   {
@@ -535,6 +535,9 @@ export function createWorld(scene, renderer) {
         if (alongX) { addBox(c, DY - 0.3, inner, piece, 0.3, DW, M.slab, { tag: 'slab', destructible: true }); addBox(c, DY, f, piece, 1.1, 0.4, M.concrete, cover); }
         else { addBox(inner, DY - 0.3, c, DW, 0.3, piece, M.slab, { tag: 'slab', destructible: true }); addBox(f, DY, c, 0.4, 1.1, piece, M.concrete, cover); }
       }
+      // sentry posts on the walkway, a pair over each main gate, looking out: [x, y, z, facing]
+      const wy = IW - 0.2 - DW / 2;
+      ramparts.push([[-5, DY, -wy, Math.PI], [5, DY, -wy, Math.PI]], [[-5, DY, wy, 0], [5, DY, wy, 0]], [[-wy, DY, -5, -Math.PI / 2], [-wy, DY, 5, -Math.PI / 2]], [[wy, DY, -5, Math.PI / 2], [wy, DY, 5, Math.PI / 2]]);
       const n = Math.ceil(DY / 0.3), run = 0.55, edge = IW - 0.2 - DW; // steps rise along the wall and finish level with the walkway
       for (const [alongX, sgn, from, dir] of [[true, -1, 6, 1], [true, 1, -6, -1], [false, -1, -6, -1], [false, 1, 6, 1]]) for (let st = 0; st < n; st++) {
         const a = from + dir * run * (st + 0.5), b = sgn * (edge - 1), h = (DY / n) * (st + 1);
@@ -664,7 +667,7 @@ export function createWorld(scene, renderer) {
 
   // ---- queries & edits used by the other systems ---------------------------
   const world = {
-    colliders, pads, ziplines, ladders, buildings, materials: M, arenaHalf: ARENA, coreHalf: CORE, spawnPoints, exitPoints, outbuildings, roads, compoundWalls, seed, strongroom, gates, fixed: true, blockout: true,
+    colliders, pads, ziplines, ladders, buildings, materials: M, arenaHalf: ARENA, coreHalf: CORE, spawnPoints, exitPoints, outbuildings, roads, compoundWalls, seed, strongroom, gates, ramparts, fixed: true, blockout: true,
     spawn: new THREE.Vector3(0, 0, 50),
     // nearest solid box along a ray -> { collider, point, normal, dist } or null
     // every solid piece touching the box x0..x1, z0..z1 (any height), written into `out` and returned
