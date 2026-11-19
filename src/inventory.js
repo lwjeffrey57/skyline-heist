@@ -3,7 +3,8 @@
 // deploy comes with you and is at risk.
 //
 // Items are plain objects kept in the saved stash:
-//   { t: 'weapon', id } | { t: 'loot', name, tier, value } | { t: 'med' } | { t: 'plate' }
+//   { t: 'weapon', id } | { t: 'loot', name, tier, value } | { t: 'med' } | { t: 'plate' } | { t: 'att', id }
+// Attachments fitted to a weapon live in stash.att[weaponId], one entry per slot that weapon has.
 
 const ICON = {
   pistol: 'M3 8h14v4h-6l-1 2H8v5H4v-7H3z',
@@ -13,13 +14,14 @@ const ICON = {
   launcher: 'M2 9h14v6H2zM16 10h6v4h-6zM6 15h3v4H6z',
   med: 'M9 3h6v6h6v6h-6v6H9v-6H3V9h6z',
   plate: 'M12 2l8 3v7c0 5-4 8-8 10-4-2-8-5-8-10V5z',
+  att: 'M3 10h12v4H3zM15 9h3v6h-3zM18 10.5h3v3h-3zM6 14h3v4H6z',
   bag: 'M8 3h8v3h2a2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V8a2 2 0 012-2h2zM10 5v1h4V5zM8 12h8v2H8z',
   common: 'M4 8l8-4 8 4v8l-8 4-8-4z',
   uncommon: 'M7 7h10v10H7zM9 3h2v3H9zM13 3h2v3h-2zM9 18h2v3H9zM13 18h2v3h-2zM3 9h3v2H3zM3 13h3v2H3zM18 9h3v2h-3zM18 13h3v2h-3z',
   rare: 'M6 3h12l4 6-10 12L2 9z',
   epic: 'M12 2l3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z',
 };
-const WEAPON_ICON = { pistol: 'pistol', rifle: 'rifle', smg: 'rifle', dmr: 'sniper', shotgun: 'shotgun', slug_shotgun: 'shotgun', sniper: 'sniper', launcher: 'launcher' };
+const WEAPON_ICON = { pistol: 'pistol', rifle: 'rifle', smg: 'rifle', dmr: 'sniper', shotgun: 'shotgun', slug_shotgun: 'shotgun', sniper: 'sniper', launcher: 'launcher', handcannon: 'pistol', lmg: 'rifle', lever: 'sniper', crossbow: 'sniper' };
 const COLOR = { common: '#c9d1d9', uncommon: '#5fd38a', rare: '#5aa9ff', epic: '#d48bff', weapon: '#ff8a3c', med: '#9be37a', plate: '#7fb4ff', bag: '#ffc56b' };
 export const BAGS = { 4: { name: 'Sling pack', cost: 800 }, 8: { name: 'Field ruck', cost: 2000 } }; // backpacks add this many pack slots
 const SUPPLY = { med: { name: 'Medkit', cost: 150, desc: 'Heals 60. Press H in a raid.' }, plate: { name: 'Armour plate', cost: 300, desc: '+50 armour when you deploy.' } };
@@ -33,17 +35,21 @@ export function createInventory(ctx, api) {
   const gunCost = (id) => (GUNS.find((g) => g[0] === id) || [0, 0, 0, 600])[3];
 
   // ---- item helpers ---------------------------------------------------------
-  const kindOf = (it) => (it.t === 'loot' ? it.tier : it.t);
-  const nameOf = (it) => (it.t === 'weapon' ? (defOf(it.id) || { name: it.id }).name : it.t === 'loot' ? it.name : it.t === 'bag' ? BAGS[it.size].name : SUPPLY[it.t].name);
-  const sellValue = (it) => (it.t === 'loot' ? it.value : it.t === 'weapon' ? Math.round(gunCost(it.id) * 0.5) : Math.round((it.t === 'bag' ? BAGS[it.size] : SUPPLY[it.t]).cost * 0.5));
+  const W = () => ctx.weapons, attOf = (id) => (W() && W().attachment ? W().attachment(id) : null) || { name: id, tier: 'common', price: 200, slot: '?', desc: '' };
+  const slotsFor = (wid) => (W() && W().slotsFor ? W().slotsFor(wid) : []);
+  const kindOf = (it) => (it.t === 'loot' ? it.tier : it.t === 'att' ? attOf(it.id).tier : it.t);
+  const nameOf = (it) => (it.t === 'weapon' ? (defOf(it.id) || { name: it.id }).name : it.t === 'loot' ? it.name : it.t === 'att' ? attOf(it.id).name : it.t === 'bag' ? BAGS[it.size].name : SUPPLY[it.t].name);
+  const sellValue = (it) => (it.t === 'att' ? Math.round(attOf(it.id).price * 0.4) : it.t === 'loot' ? it.value : it.t === 'weapon' ? Math.round(gunCost(it.id) * 0.5) : Math.round((it.t === 'bag' ? BAGS[it.size] : SUPPLY[it.t]).cost * 0.5));
   const iconOf = (it) => ICON[it.t === 'weapon' ? WEAPON_ICON[it.id] || 'rifle' : it.t === 'loot' ? it.tier : it.t];
+  const fitNames = (id) => { const a = attOf(id); return Array.isArray(a.fits) ? a.fits.map((w) => (defOf(w) || { name: w }).name).join(', ') : 'any gun with the slot'; };
   const describe = (it) => {
     if (it.t === 'weapon') { const d = defOf(it.id); return d ? `${d.tag} · ${d.damage}${d.pellets > 1 ? ` × ${d.pellets}` : ''} damage · ${d.rpm} rpm · ${d.mag} rounds` : 'Weapon'; }
     if (it.t === 'loot') return `${it.tier[0].toUpperCase()}${it.tier.slice(1)} valuable`;
+    if (it.t === 'att') { const a = attOf(it.id); return `${a.slot[0].toUpperCase()}${a.slot.slice(1)} attachment — ${a.desc} Fits: ${fitNames(it.id)}. Drag it onto that weapon's ${a.slot} slot.`; }
     if (it.t === 'bag') return `Backpack: +${it.size} pack slots while equipped`;
     return SUPPLY[it.t].desc;
   };
-  const accepts = (zone, it) => zone === 'stash' || zone === 'sell' || (zone === 'pack' ? it.t !== 'weapon' && it.t !== 'bag' : zone === 'w' ? it.t === 'weapon' : zone === 'bag' ? it.t === 'bag' : false);
+  const accepts = (zone, it, ti = 0) => zone === 'stash' || zone === 'sell' || (zone.startsWith('att_') ? it.t === 'att' && W() && W().fits(it.id, zone.slice(4)) && attOf(it.id).slot === slotsFor(zone.slice(4))[ti] : zone === 'pack' ? it.t !== 'weapon' && it.t !== 'bag' && it.t !== 'att' : zone === 'w' ? it.t === 'weapon' : zone === 'bag' ? it.t === 'bag' : false);
 
   // ---- saved layout ---------------------------------------------------------
   function normalise() {
@@ -63,11 +69,13 @@ export function createInventory(ctx, api) {
     if (i < 0) { stash.credits += sellValue(it); return false; }
     stash.grid[i] = it; return true;
   }
-  const zoneArr = (zone) => (zone === 'stash' ? stash.grid : zone === 'pack' ? stash.pack : zone === 'bag' ? stash.b : stash.w);
+  const attArr = (wid) => { stash.att = stash.att || {}; const n = slotsFor(wid).length, a = stash.att[wid] || (stash.att[wid] = []); while (a.length < n) a.push(null); return a; };
+  const zoneArr = (zone) => (zone.startsWith('att_') ? attArr(zone.slice(4)) : zone === 'stash' ? stash.grid : zone === 'pack' ? stash.pack : zone === 'bag' ? stash.b : stash.w);
 
   // ---- DOM ------------------------------------------------------------------
   const style = document.createElement('style');
   style.textContent = `
+    #iv .deploy { position: sticky; bottom: 0; z-index: 2; box-shadow: 0 -10px 18px 6px #0c1016; } /* always reachable, however tall the loadout column gets */
     #iv { position: fixed; inset: 0; z-index: 30; display: grid; grid-template-columns: 300px 1fr 290px; gap: 18px; padding: 22px 26px 16px; background: linear-gradient(160deg, #0a0e13, #10141a); color: #fff; user-select: none; overflow: auto;
       font-family: "Bahnschrift","DIN Alternate","Roboto Condensed","Arial Narrow",system-ui,sans-serif; }
     #iv h1 { margin: 0; font-size: 22px; letter-spacing: 7px; text-transform: uppercase; }
@@ -134,7 +142,7 @@ export function createInventory(ctx, api) {
     normalise();
     const risk = stash.pack.concat(stash.w, stash.b).reduce((a, it) => a + (it ? sellValue(it) : 0), 0);
     const pistol = defOf('pistol');
-    const shop = GUNS.map(([id, , , cost]) => ({ it: { t: 'weapon', id }, cost })).concat(Object.keys(SUPPLY).map((k) => ({ it: { t: k }, cost: SUPPLY[k].cost })), Object.keys(BAGS).map((k) => ({ it: { t: 'bag', size: Number(k) }, cost: BAGS[k].cost })));
+    const shop = GUNS.map(([id, , , cost]) => ({ it: { t: 'weapon', id }, cost })).concat(Object.keys(SUPPLY).map((k) => ({ it: { t: k }, cost: SUPPLY[k].cost })), (W() && W().attachments ? W().attachments : []).map((a) => ({ it: { t: 'att', id: a.id }, cost: a.price })), Object.keys(BAGS).map((k) => ({ it: { t: 'bag', size: Number(k) }, cost: BAGS[k].cost })));
     root.innerHTML = `
       <div>
         <h1>Skyline Heist</h1>
@@ -147,6 +155,7 @@ export function createInventory(ctx, api) {
           ${slot('w', 1, stash.w[1], 'wide', 'Drag a weapon here')}
           ${slot('bag', 0, stash.b[0], 'wide', 'Backpack slot')}
         </div>
+        ${['pistol'].concat(stash.w.filter(Boolean).map((w) => w.id)).filter((wid, i, a) => a.indexOf(wid) === i && slotsFor(wid).length).map((wid) => `<h3 style="margin:8px 0 3px">${esc((defOf(wid) || { name: wid }).name)} — attachments</h3><div class="grid" style="grid-template-columns:repeat(5,1fr)">${slotsFor(wid).map((sn, i) => slot('att_' + wid, i, attArr(wid)[i], '', sn)).join('')}</div>`).join('')}
         <h3>Pack — ${stash.pack.filter(Boolean).length}/${packSize()} · carried worth ${risk} cr</h3>
         <div class="grid" style="grid-template-columns:repeat(4,1fr)">${stash.pack.map((it, i) => slot('pack', i, it)).join('')}</div>
         <button class="mini" data-act="store">Move pack to stash</button> <button class="mini" data-act="sellpack">Sell pack valuables</button>
@@ -188,11 +197,11 @@ export function createInventory(ctx, api) {
   function drop(target) {
     const { zone, i, it } = drag, tz = target.dataset.zone, ti = Number(target.dataset.i);
     if (tz === zone && ti === i) return;
-    if (!accepts(tz, it)) return chime([200], 0.05, 0.12, 0.1, 'square');
+    if (!accepts(tz, it, ti)) return chime([200], 0.05, 0.12, 0.1, 'square');
     const from = zoneArr(zone);
     if (tz === 'sell') { stash.credits += sellValue(it); from[i] = null; chime([880, 1320], 0.05, 0.14); return; }
     const to = zoneArr(tz), other = to[ti];
-    if (other && !accepts(zone, other)) return chime([200], 0.05, 0.12, 0.1, 'square');
+    if (other && !accepts(zone, other, i)) return chime([200], 0.05, 0.12, 0.1, 'square');
     to[ti] = it; from[i] = other || null; chime([520], 0.05, 0.08, 0.1);
   }
   root.addEventListener('mousedown', (e) => {
@@ -208,7 +217,7 @@ export function createInventory(ctx, api) {
     if (drag) {
       ghost.style.left = `${e.clientX}px`; ghost.style.top = `${e.clientY}px`;
       root.querySelectorAll('.over').forEach((n) => n.classList.remove('over'));
-      const z = zoneEl(e.clientX, e.clientY); if (z && accepts(z.dataset.zone, drag.it)) z.classList.add('over');
+      const z = zoneEl(e.clientX, e.clientY); if (z && accepts(z.dataset.zone, drag.it, Number(z.dataset.i))) z.classList.add('over');
       return;
     }
     // tooltip

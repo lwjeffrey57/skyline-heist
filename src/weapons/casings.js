@@ -7,6 +7,7 @@ import * as THREE from 'three';
 const MAX = 32, LIFE = 2.6;
 const KIND = { // length scale, radius scale, colour
   pistol: [0.45, 0.95, 0xd6ad5a], rifle: [1, 1, 0xd6ad5a], sniper: [2.1, 1.45, 0xd6ad5a], shotgun: [1.5, 2.1, 0xb8301f],
+  handcannon: [0.7, 1.25, 0xd6ad5a], lmg: [1.1, 1.05, 0xd6ad5a], lever: [0.9, 1.2, 0xd6ad5a], slug_shotgun: [1.5, 2.1, 0x6d3fb0], smg: [0.5, 0.95, 0xd6ad5a], dmr: [1.3, 1.15, 0xd6ad5a],
 };
 
 export function createCasings(ctx) {

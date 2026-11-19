@@ -3,7 +3,8 @@
 //
 // Units: time in seconds, angles in DEGREES, distance in metres.
 //
-//   id            string sent in events ('pistol' | 'rifle' | 'shotgun' | 'sniper' | 'launcher'); name = display name
+//   id            string sent in events ('pistol' | 'rifle' | 'shotgun' | 'sniper' | 'launcher' | ...); name = display name
+//                 (fx and audio pick the weapon class from words in the id: 'cannon' -> heavy, 'shot' -> shotgun, ...)
 //   modes         fire modes, toggled with B: 'auto' | 'semi' | 'burst'
 //   rpm           rate of fire. burst: { count, rpm, gap } (gap = pause after a burst)
 //   damage        per bullet / per pellet.  headMult: headshot multiplier
@@ -38,6 +39,16 @@
 //                 scope: true = look through the telescopic sight (its eyepiece fills the view)
 //   view          hip: viewmodel position [right, up, forward] at the hip, fov: viewmodel FOV,
 //                 adsDist: how far the sight sits from the eye when aimed
+//   suppressed    true: 'shot' events carry suppressed (guards hear it from a quarter of the distance)
+//   noFlash       true: no muzzle blast at all (the 'shot' event carries no `dir`, so fx draws no flash / tracer)
+//   cycleCue      seconds after a shot at which the action is worked by hand (lever): emits
+//                 reloadStage { stage:'charge', cycle:true } so the sound lands on the animation
+//   reload.dump   true: the spent cases leave the gun together at the 'out' stage (revolver)
+//   reload.stages an entry may be null: that stage is skipped (no event)
+//   spread.sustain { after, bloomMax, rate }: from the `after`-th round of a spray the bloom ceiling drops to
+//                 bloomMax (by `rate` per shot): a gun that settles the longer the trigger is held
+//
+// Attachments (attachments.js) never change these objects: every inventory slot has its own effective copy.
 // =============================================================================
 
 // WREN AR-6: the first three rounds kick softly (bursts stay on target), rounds 4-9 climb hard, then the
@@ -155,6 +166,69 @@ WEAPONS.push(
   },
 );
 
+// ---- four guns with their own models and actions (viewmodels2.js) ------------------------------------------------
+// CORMORANT-100: the first rounds buck and wander; hold the trigger and the gun settles into a tight, slow walk.
+const lmgRecoil = [
+  [0.62, 0.10], [0.66, -0.13], [0.64, 0.16], [0.58, -0.15], [0.52, 0.14], [0.46, -0.12], [0.40, 0.10], [0.34, -0.09],
+  [0.28, 0.08], [0.24, -0.07], [0.20, 0.06], [0.17, -0.05], [0.15, 0.05], [0.14, -0.04], [0.13, 0.04], [0.12, -0.04],
+];
+WEAPONS.push(
+  { // reward sidearm: six heavy rounds, two to the body drop a guard, a miss costs half a second
+    id: 'handcannon', name: 'ROOK-6', tag: 'Heavy revolver', accent: '#e8b06a',
+    modes: ['semi'], rpm: 110,
+    damage: 78, headMult: 1.9, headR: 0.24, falloff: [20, 50, 0.6], pellets: 1, range: 250,
+    mag: 6, reserve: 36, killRefund: 6,
+    reload: { type: 'mag', time: 2.7, commit: 0.66, stages: [0.14, 0.66, 0.86], dump: true }, // open / rounds in / snapped shut
+    equip: 0.24, sprintOut: 0.1, mobility: 1.02,
+    spread: { hip: 0.3, ads: 0.0, move: 0.9, air: 1.8, slide: 0.6, bloom: 1.6, bloomMax: 3.0, decay: 6, delay: 0.25, crouch: 0.7, adsMoveMult: 0.3, adsBloom: 0.4 },
+    recoil: { pattern: [[4.6, 0.5], [4.4, -0.6], [4.5, 0.4]], loop: 3, jitter: 0.3, adsMult: 0.85, crouchMult: 0.9, snap: 60, recover: 7.5, delay: 0.12 },
+    kick: { z: 0.07, rx: 0.26, roll: 0.06, jolt: 0.004, cam: 0.02, camRoll: 0.012, fov: 1.8, climb: 0.03, climbMax: 0.06 },
+    ads: { fov: 0.82, time: 0.15, move: 0.95, vmFov: 50 },
+    view: { hip: [0.11, -0.125, 0.36], fov: 60, adsDist: 0.4 },
+  },
+  { // holds a room: a hundred rounds that get steadier the longer the trigger is held, and everything else is slow
+    id: 'lmg', name: 'CORMORANT-100', tag: 'Belt machine gun', accent: '#b7d36a',
+    modes: ['auto'], rpm: 700,
+    damage: 24, headMult: 1.5, headR: 0.24, falloff: [35, 80, 0.65], pellets: 1, range: 450,
+    mag: 100, reserve: 200, killRefund: 25,
+    reload: { type: 'mag', time: 4.4, commit: 0.68, tactical: 0.84, stages: [0.1, 0.68, 0.82] }, // box off / cover shut / charged
+    equip: 0.6, sprintOut: 0.24, mobility: 0.86,
+    spread: { hip: 1.6, ads: 0.1, move: 1.6, air: 3.0, slide: 1.2, bloom: 0.22, bloomMax: 2.4, decay: 7, crouch: 0.55, adsMoveMult: 0.45, adsBloom: 0.5,
+      sustain: { after: 10, bloomMax: 0.5, rate: 0.25 } },
+    recoil: { pattern: lmgRecoil, loop: 4, jitter: 0.07, adsMult: 0.7, crouchMult: 0.6, snap: 70, recover: 8, delay: 0.12 },
+    kick: { z: 0.04, rx: 0.022, roll: 0.03, jolt: 0.003, cam: 0.004, camRoll: 0.006, fov: 0.6, climb: 0.008, climbMax: 0.05 },
+    eject: { delay: 0.0, vel: [2.2, 0.4, 0.2] },
+    ads: { fov: 0.74, time: 0.34, move: 0.55, vmFov: 44 },
+    view: { hip: [0.215, -0.215, 0.43], fov: 60, adsDist: 0.2 },
+  },
+  { // scout carbine: light, quick to the shoulder, accurate on the move; every shot is worked by hand
+    id: 'lever', name: 'KESTREL L7', tag: 'Lever carbine', accent: '#d9a441',
+    modes: ['semi'], rpm: 125, cycleCue: 0.2,
+    damage: 72, headMult: 1.9, headR: 0.24, falloff: [35, 85, 0.7], pellets: 1, range: 400,
+    mag: 7, reserve: 56, killRefund: 7,
+    reload: { type: 'shell', start: 0.28, shell: 0.38, insert: 0.55, end: 0.3 },
+    equip: 0.2, sprintOut: 0.08, mobility: 1.04,
+    spread: { hip: 0.35, ads: 0.0, move: 0.5, air: 1.2, slide: 0.4, bloom: 0.9, bloomMax: 2.0, decay: 7, crouch: 0.7, adsMoveMult: 0.15, adsBloom: 0.3 },
+    recoil: { pattern: [[2.9, 0.25], [2.7, -0.3], [2.8, 0.2]], loop: 3, jitter: 0.2, adsMult: 0.8, crouchMult: 0.85, snap: 60, recover: 9, delay: 0.1 },
+    kick: { z: 0.07, rx: 0.085, roll: 0.045, jolt: 0.003, cam: 0.011, camRoll: 0.008, fov: 1.2, climb: 0.02, climbMax: 0.05 },
+    eject: { delay: 0.2, vel: [0.9, 2.4, 0.3] },
+    ads: { fov: 0.7, time: 0.12, move: 0.92, vmFov: 44 },
+    view: { hip: [0.2, -0.19, 0.46], fov: 60, adsDist: 0.22 },
+  },
+  { // the quiet option: one bolt, almost no noise, a long draw before the next. A head shot kills anything on foot.
+    id: 'crossbow', name: 'NIGHTJAR', tag: 'Bolt thrower', accent: '#b48cff',
+    modes: ['semi'], rpm: 120, suppressed: true, noFlash: true,
+    damage: 110, headMult: 2.4, headR: 0.24, falloff: [25, 60, 0.7], pellets: 1, range: 200,
+    mag: 1, reserve: 24, killRefund: 2,
+    reload: { type: 'mag', time: 1.7, commit: 0.72, stages: [0.5, 0.72, null] }, // string latched / bolt seated
+    equip: 0.34, sprintOut: 0.13, mobility: 1.0,
+    spread: { hip: 0.6, ads: 0.0, move: 0.8, air: 1.6, slide: 0.6, bloom: 0.5, bloomMax: 0.5, decay: 3, crouch: 0.6, adsMoveMult: 0.2 },
+    recoil: { pattern: [[0.9, 0.1], [0.9, -0.1]], loop: 2, jitter: 0.1, adsMult: 0.8, crouchMult: 0.85, snap: 50, recover: 9, delay: 0.1 },
+    kick: { z: 0.022, rx: 0.03, roll: 0.03, cam: 0.004, camRoll: 0.004, fov: 0.3, climb: 0.0, climbMax: 0.01 },
+    ads: { fov: 0.62, time: 0.2, move: 0.8, vmFov: 40 },
+    view: { hip: [0.205, -0.2, 0.44], fov: 60, adsDist: 0.2 },
+  },
+);
 
 // Bouncing explosives. Blast damage falls off linearly from `damage` at the centre to damage*edge at `radius`.
 export const PROJECTILES = {

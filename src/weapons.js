@@ -4,6 +4,8 @@ import { buildViewmodel } from './weapons/viewmodels.js';
 import { createHud } from './weapons/hud.js';
 import { createProjectiles } from './weapons/projectiles.js';
 import { createCasings } from './weapons/casings.js';
+import { ATTACHMENTS, SLOT_NAMES, attachment, slotsFor, fits, cleanSet, effectiveDef, summary } from './weapons/attachments.js';
+import { applyAttachments } from './weapons/attachparts.js';
 
 // Weapons system: gun logic, first-person viewmodel + animation, recoil / camera feel, weapon HUD.
 // All tuning lives in ./weapons/defs.js. Contract: see core.js. Effects and sound are made by other
@@ -19,6 +21,14 @@ import { createCasings } from './weapons/casings.js';
 //   reloadDone    { weapon, tactical }   ammo is in the gun        reloadCancel { weapon }   aborted by firing / switching
 //   shellInsert   { weapon }             dryFire { weapon }        weaponSwitch { weapon, name }   fireMode { weapon, mode }
 //   lowAmmo       { weapon, frac, left } with every shot from the last 30% of a magazine (frac = rounds left / magazine, 0 = empty)
+//   attachments   { weapon, set:{ slot: id } }   a gun's attachments changed (setAttachments)
+// 'shot' also carries `loud` (1 = normal; a compensator / brake raises it) and, for a weapon with no muzzle blast
+// (crossbow), `noFlash: true` and NO `dir` (fx draws nothing for it; `dirs` still holds the line of fire).
+// A hand-worked action (lever) reports its cycle as reloadStage { stage:'charge', cycle:true } after each shot.
+//
+// Attachments: every inventory slot has `base` (the shared def from defs.js, never modified) and `def` (its own
+// effective def = base + fitted attachments; the object is stable, it is rewritten in place when the set changes).
+// See ./weapons/attachments.js for the catalogue and the API at the bottom of this file.
 // Listened for (optional): botStagger { bot?, by?, armorBreak? } -> small ring on the hit marker.
 
 const D2R = Math.PI / 180;
@@ -53,22 +63,49 @@ export function init(ctx) {
   // ---- inventory + viewmodels ------------------------------------------------
   const vmRoot = new THREE.Group(); vmRoot.name = 'wp-viewmodel';
   camera.add(vmRoot);
-  const inv = WEAPONS.map((def) => {
-    const vm = buildViewmodel(def.id);
+  const dress = (o) => { if (o.isMesh) { patchDepth(o.material); o.renderOrder = o.material.isShaderMaterial || o.material.transparent ? 12 : 10; } };
+  const inv = WEAPONS.map((base) => {
+    const vm = buildViewmodel(base.id);
     const pose = new THREE.Group(); pose.add(vm.group); pose.visible = false; vmRoot.add(pose);
-    vm.group.traverse((o) => { if (o.isMesh) { patchDepth(o.material); o.renderOrder = o.material.isShaderMaterial ? 12 : 10; } });
-    const sight = vm.sight;
+    vm.group.traverse(dress);
+    const sight = vm.sight, def = effectiveDef(base, null, player.baseFov);
     return {
-      def, vm, pose, mag: def.mag, reserve: def.reserve, mode: def.modes[0], regenT: 0,
+      base, def, att: {}, attLabel: '', supVis: !!def.suppressed, vm, pose, mag: def.mag, reserve: def.reserve, mode: def.modes[0], regenT: 0,
       hip: new THREE.Vector3(def.view.hip[0], def.view.hip[1], -def.view.hip[2]),
       adsPos: new THREE.Vector3(-sight[0], -sight[1], -(def.view.adsDist ?? 0.24) + sight[2]),
     };
   });
+  // Rebuild one slot's effective def (in place: other systems hold on to `def`) and dress its viewmodel.
+  function refit(it, fill = false) {
+    const ext = it.def.suppressed; // may have been set from outside (raid.js: the pistol-suppressor upgrade)
+    const d = effectiveDef(it.base, it.att, player.baseFov);
+    for (const k in it.def) delete it.def[k];
+    Object.assign(it.def, d);
+    if (!it.base.suppressed && ext !== undefined) it.def.suppressed = ext;
+    dressVm(it);
+    if (fill) { it.mag = d.mag; it.reserve = d.reserve; }
+    else { if (it.mag > d.mag + 1) { it.reserve += it.mag - d.mag; it.mag = d.mag; } it.reserve = Math.min(it.reserve, d.reserve); }
+    if (!d.modes.includes(it.mode)) it.mode = d.modes[0];
+    it.attLabel = SLOT_NAMES.filter((s) => it.att[s]).map((s) => attachment(it.att[s]).short).join('  ');
+  }
+  function dressVm(it) {
+    const d = it.def, vm = it.vm, vis = { ...it.att };
+    it.supVis = !!d.suppressed;
+    // a suppressor that came from outside the attachment system (base upgrade) is still shown on the gun
+    if (it.supVis && !it.base.suppressed && !vis.muzzle && vm.mounts.muzzle) vis.muzzle = 'suppressor';
+    for (const n of applyAttachments(vm, vis, d)) n.traverse(dress);
+    const sight = vm.sight;
+    let adsDist = d.view.adsDist ?? 0.24;
+    // an optic that sits further forward / back than the factory sight: keep the gun where it was, within reason
+    if (sight !== vm.base.sight && !d.ads.scope) adsDist = clamp(adsDist + (sight[2] - vm.base.sight[2]), 0.14, 0.42);
+    it.hip.set(d.view.hip[0], d.view.hip[1], -d.view.hip[2]);
+    it.adsPos.set(-sight[0], -sight[1], -adsDist + sight[2]);
+  }
 
   const S = {
     idx: 0, last: 1, pending: -1, state: 'equip', t: 0, // state: equip | ready | holster | reload
     rl: null, ads: 0, sprint: 0, lower: 0,
-    nextFire: 0, burstLeft: 0, lastShot: -10, spray: 0, bloom: 0, heat: 0,
+    nextFire: 0, burstLeft: 0, lastShot: -10, spray: 0, bloom: 0, heat: 0, cueT: 0, cueW: '',
     fireBuf: 0, spread: 0, shots: 0,
     grenades: GRENADE.charges, grenT: 0, throwT: -1, thrown: false,
     lastPitch: player.pitch, lastYaw: player.yaw,
@@ -93,7 +130,7 @@ export function init(ctx) {
   // reused every frame (no per-frame garbage)
   const animRl = { phase: '', t: 0, n: 0, pump: false, to: 0, tac: false, end: 1 };
   const animS = { time: 0, cycle: 0, mag: 0, magSize: 0, reserve: 0, heat: 0, rl: null, mode: '', trigger: 0 };
-  const hudS = { w: null, idx: 0, inv: null, mag: 0, reserve: 0, mode: '', spreadPx: 0, ads: 0, adsScope: false, sight: true, reload: -1, sprint: 0, hidden: false, comboLeft: 0, grenades: 0, grenMax: 0, grenCharge: 0, scopePx: null };
+  const hudS = { att: '', w: null, idx: 0, inv: null, mag: 0, reserve: 0, mode: '', spreadPx: 0, ads: 0, adsScope: false, sight: true, reload: -1, sprint: 0, hidden: false, comboLeft: 0, grenades: 0, grenMax: 0, grenCharge: 0, scopePx: null };
   const scopeS = { x: 0, y: 0, r: 0, a: 0 };
   const _ev = new THREE.Vector3(), _ep = new THREE.Vector3();
   const cur = () => inv[S.idx];
@@ -172,7 +209,7 @@ export function init(ctx) {
     // tactical reload: rounds left, so one stays chambered (mag + 1) and the charge is skipped
     const tac = r.type === 'mag' && !!r.tactical && w.mag > 0;
     S.rl = r.type === 'shell' ? { type: 'shell', phase: 'start', t: 0, n: 0, pump: w.mag === 0, done: false, stop: false }
-      : { type: 'mag', phase: 'mag', t: 0, done: false, to: Math.min(w.def.mag, w.mag + w.reserve), tac, end: tac ? r.tactical : 1, stage: 0 };
+      : { type: 'mag', phase: 'mag', t: 0, done: false, to: Math.min(w.def.mag, w.mag + w.reserve), tac, end: tac ? r.tactical : 1, stage: 0, spent: w.def.mag - w.mag };
     events.emit('reload', { weapon: w.def.id, time: r.type === 'shell' ? r.start + r.shell : r.time * S.rl.end, tactical: tac, empty: w.mag === 0 });
     return true;
   }
@@ -180,7 +217,7 @@ export function init(ctx) {
     const w = cur(), r = w.def.reload, rl = S.rl;
     if (rl.type === 'mag') {
       // a fresh click with rounds in the gun, before the new magazine is seated, aborts the reload and fires
-      const charge = r.stages ? r.stages[2] : Math.min(0.9, r.commit + 0.12);
+      const charge = r.stages && r.stages[2] != null ? r.stages[2] : Math.min(0.9, r.commit + 0.12);
       const fireAt = rl.tac ? r.commit + 0.06 : r.stages ? charge + 0.1 : r.commit + 0.12;
       if (ctx.time - S.clickT < 0.05 && S.fireBuf > 0) { // a fresh click
         const wait = (fireAt - rl.t) * r.time;
@@ -196,8 +233,10 @@ export function init(ctx) {
       rl.t += dt / r.time;
       while (rl.stage < (rl.tac ? 2 : 3)) {
         const at = r.stages ? r.stages[rl.stage] : rl.stage === 0 ? 0.12 : rl.stage === 1 ? r.commit : charge;
+        if (at == null) { rl.stage++; continue; } // this gun has no such step
         if (rl.t < at) break;
         events.emit('reloadStage', { weapon: w.def.id, stage: STAGE[rl.stage], tactical: rl.tac });
+        if (rl.stage === 0 && r.dump && w.vm.eject) dumpCases(w, rl.spent);
         rl.stage++;
       }
       if (!rl.done && rl.t >= r.commit) {
@@ -220,6 +259,16 @@ export function init(ctx) {
         else { rl.t = 0; rl.done = false; }
       }
     } else { rl.t += dt / r.end; if (rl.t >= 1 || (rl.stop && !rl.pump && rl.t > 0.6)) { S.state = 'ready'; endReload(); } }
+  }
+
+  // revolver: the spent cases fall out together when the cylinder is opened
+  function dumpCases(it, n) {
+    camera.updateMatrixWorld(true);
+    it.vm.eject.getWorldPosition(_ep);
+    for (let i = 0; i < n; i++) {
+      _ev.set((Math.random() - 0.5) * 0.9, -0.6 - Math.random() * 0.8, (Math.random() - 0.5) * 0.9).add(player.vel);
+      casings.spawn(_ep, _ev, it.def.id);
+    }
   }
 
   // ---- shooting -------------------------------------------------------------------
@@ -294,7 +343,9 @@ export function init(ctx) {
         else { const inner = i <= 3; const n = inner ? 3 : w.pellets - 4; const k = inner ? i - 1 : i - 4;
           dirs.push(spreadDir(spreadRad, (k / n) * Math.PI * 2 + S.shots * 1.3 + (Math.random() - 0.5) * 0.7, (inner ? 0.42 : 0.86) + (Math.random() - 0.5) * 0.26)); }
       }
-      events.emit('shot', { weapon: w.id, name: w.name, origin, dir: w.pellets === 1 ? dirs[0] : aim, dirs, muzzle, by: player, pellets: w.pellets, suppressed: !!w.suppressed });
+      const shot = { weapon: w.id, name: w.name, origin, dir: w.pellets === 1 ? dirs[0] : aim, dirs, muzzle, by: player, pellets: w.pellets, suppressed: !!(w.suppressed || w.attSuppressed), loud: w.loud || 1 };
+      if (w.noFlash) { shot.dir = undefined; shot.noFlash = true; } // no muzzle blast: fx skips a shot that has no `dir`
+      events.emit('shot', shot);
       const agg = { hit: false, head: false, kill: false, dmg: 0, heads: new Set(), kills: [] };
       for (const d of dirs) bullet(w, origin, d, agg);
       // a kill counts as a headshot kill if any pellet of this shot hit that target's head
@@ -319,13 +370,17 @@ export function init(ctx) {
     sp.krz.kick(side * (0.35 + Math.random() * 0.65) * k.roll, k.roll * 2); sp.kry.kick((Math.random() - 0.5) * k.roll * 0.8, k.roll);
     sp.climb.kick(k.climb * lerp(1, 0.5, S.ads), k.climbMax);
     if (k.jolt) { const j = k.jolt * lerp(1, 0.35, S.ads); sp.kx.kick((Math.random() - 0.5) * 2 * j, j * 2); sp.ky.kick((0.3 + Math.random() * 0.7) * j, j * 2); }
-    if (it.mag <= w.mag * FEEL.lowAmmo) events.emit('lowAmmo', { weapon: w.id, frac: it.mag / w.mag, left: it.mag });
+    if (w.mag >= 4 && it.mag <= w.mag * FEEL.lowAmmo) events.emit('lowAmmo', { weapon: w.id, frac: it.mag / w.mag, left: it.mag });
+    if (w.cycleCue) { S.cueT = ctx.time + w.cycleCue; S.cueW = w.id; }
     if (w.eject) S.ejects.push({ t: ctx.time + w.eject.delay, w });
     S.trig = 1;
     sp.camP.kick(k.cam, k.cam * 2.5); sp.camR.kick((Math.random() - 0.5) * 2 * k.camRoll, k.camRoll * 2);
     camera.fov += k.fov * lerp(1, 0.5, S.ads);
     S.scopeKick = Math.min(0.2, S.scopeKick + k.z * 0.9);
-    S.bloom = Math.min(w.spread.bloomMax, S.bloom + w.spread.bloom * (it.mode === 'burst' ? 0.6 : 1));
+    const sus = w.spread.sustain;
+    // sustained fire that settles: past `after` rounds the bloom ceiling comes down a step per shot
+    if (sus && S.spray >= sus.after) S.bloom = Math.max(sus.bloomMax, Math.min(S.bloom, w.spread.bloomMax) - sus.rate);
+    else S.bloom = Math.min(w.spread.bloomMax, S.bloom + w.spread.bloom * (it.mode === 'burst' ? 0.6 : 1));
     S.heat = Math.min(1, S.heat + (w.modes.includes('auto') ? 0.06 : 0.45));
     S.lastShot = ctx.time; S.fireBuf = 0;
   }
@@ -432,6 +487,8 @@ export function init(ctx) {
     if (S.state === 'holster' && S.t >= FEEL.holster) { raise(); it = cur(); w = it.def; }
     else if (S.state === 'equip' && S.t >= w.equip) S.state = 'ready';
     else if (S.state === 'reload') updateReload(dt);
+    if (S.cueT > 0 && time >= S.cueT) { S.cueT = 0; if (S.cueW === w.id && S.state !== 'holster') events.emit('reloadStage', { weapon: w.id, stage: 'charge', tactical: false, cycle: true }); }
+    if (!!w.suppressed !== it.supVis) dressVm(it); // (suppressor upgrade switched from outside)
     if (S.state === 'ready' && it.mag === 0 && it.reserve > 0 && time - S.lastShot > Math.min(0.45, 60 / w.rpm * 0.6) && S.throwT < 0) startReload();
 
     if (S.throwT >= 0) {
@@ -464,7 +521,7 @@ export function init(ctx) {
     const air = !player.grounded && player.state === 'normal';
     let spread = lerp(s.hip, s.ads, adsE)
       + ((hs > 0.6 ? s.move * Math.min(1.5, hs / FEEL.walkSpeed) : 0) + (air ? s.air : 0) + (player.sliding ? s.slide : 0)) * lerp(1, s.adsMoveMult, adsE)
-      + S.bloom * lerp(1, s.adsBloom ?? 0.4, adsE);
+      + S.bloom * lerp(s.hipBloom ?? 1, s.adsBloom ?? 0.4, adsE);
     if (player.crouching && player.grounded && !player.sliding) spread *= s.crouch;
     S.spread = spread;
 
@@ -611,7 +668,7 @@ export function init(ctx) {
     let reload = -1;
     if (S.rl) reload = S.rl.type === 'mag' ? Math.min(1, S.rl.t / S.rl.end) : clamp((it.mag + (S.rl.phase === 'loop' && !S.rl.done ? S.rl.t * 0.9 : 0)) / w.mag, 0, 1);
     const h = hudS;
-    h.w = w; h.idx = S.idx; h.inv = inv; h.mag = it.mag; h.reserve = it.reserve; h.mode = it.mode;
+    h.att = it.attLabel; h.w = w; h.idx = S.idx; h.inv = inv; h.mag = it.mag; h.reserve = it.reserve; h.mode = it.mode;
     h.spreadPx = Math.tan(S.spread * D2R) * pxPerRad; h.ads = S.ads; h.adsScope = !!w.ads.scope; h.sight = w.id !== 'launcher'; h.reload = reload; h.sprint = S.sprint;
     h.hidden = S.state === 'holster' || player.state === 'mantle';
     h.comboLeft = 1 - (time - score.lastKillT) / SCORE.multiWindow;
@@ -619,8 +676,43 @@ export function init(ctx) {
     hud.update(h, dt);
   }
 
+  // ---- attachments ---------------------------------------------------------------------------------------
+  const slotOf = (weaponId) => inv.find((v) => v.base.id === weaponId) || null;
+  // Replace a gun's whole set. `set` = { slot: attachmentId | null }; anything that does not fit is dropped.
+  // opts.fill: also refill magazine and reserve to the new sizes (use it from the stash; mid-raid leave it off:
+  // a bigger magazine then has to be reloaded to be filled, a smaller one hands its extra rounds back to the reserve).
+  // Returns the set that was actually fitted.
+  function setAttachments(weaponId, set, opts = {}) {
+    const it = slotOf(weaponId); if (!it) return {};
+    it.att = cleanSet(weaponId, set);
+    if (it === cur()) { // mid-raid on the gun in hand: whatever it was doing is cut short
+      if (S.rl) endReload(true);
+      if (S.state === 'reload') S.state = 'ready';
+      S.burstLeft = 0; S.spray = 0;
+    }
+    refit(it, !!opts.fill);
+    events.emit('attachments', { weapon: weaponId, set: { ...it.att } });
+    return { ...it.att };
+  }
+
   // public API for other systems / tests
   ctx.weapons = {
+    // attachments: catalogue [{ id, name, short, slot, desc, fits, tier, price, mods }], and per-gun sets
+    attachments: ATTACHMENTS,
+    attachment,                                                  // (id) -> catalogue entry | null
+    slotsFor,                                                    // (weaponId) -> ['muzzle', 'optic', ...] ([] = takes none)
+    fits,                                                        // (attId, weaponId) -> boolean
+    getAttachments(weaponId) { const it = slotOf(weaponId); return it ? { ...it.att } : {}; },
+    setAttachments,
+    // (weaponId) -> numbers for UI: { damage, rpm, mag, reserve, reload, reloadTactical, ads, adsFov, zoom, adsMove,
+    //   mobility, recoilV, recoilH, recoil, hipSpread, range:[start,end], suppressed, scope, attachments, slots,
+    //   def (the full effective def), base (the same numbers for the bare gun) }.
+    // Pass a second argument { slot: id } to preview a set without fitting it.
+    effective(weaponId, preview) {
+      const it = slotOf(weaponId); if (!it) return null;
+      const d = preview ? effectiveDef(it.base, cleanSet(weaponId, preview), player.baseFov) : it.def;
+      return { ...summary(d), slots: slotsFor(weaponId), def: d, base: summary(it.base) };
+    },
     defs: WEAPONS, inventory: inv, state: S, recoil: rec, projectiles: proj.list,
     get current() { return cur(); },
     switchTo, reload: startReload,

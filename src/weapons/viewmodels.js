@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { materials, Kit, rbox, tube, pin, lathe, profile, section, ngon, roundRect, rail, screw, sub, offset, buildHand, squeeze, marking } from './vmkit.js';
 import { redDotLens, scopeLens } from './optics.js';
+import { clamp01, seg, ease, eseg, bump, finish, WRAP_CURLS, GRIP_THUMB, gripHand, cupHand, GRIP_PTS, shiftPts, TRIGGER } from './vmcommon.js';
+import { buildHandcannon, buildLmg, buildLever, buildCrossbow } from './viewmodels2.js';
 
 // First-person weapon models (procedural). Gun space: +x right, +y up, forward is -z; helpers take (x, y, f).
 // Each builder returns:
@@ -13,28 +15,6 @@ import { redDotLens, scopeLens } from './optics.js';
 //                           rl: null | { phase, t 0..1, n, pump, to, tac, end } },  out = { p, r } extra pose offset
 //                     (tac = tactical reload: no charge, the animation ends at t = end instead of 1)
 
-const clamp01 = (x) => Math.min(1, Math.max(0, x));
-const seg = (t, a, b) => clamp01((t - a) / (b - a));
-const ease = (x) => x * x * (3 - 2 * x);
-const eseg = (t, a, b) => ease(seg(t, a, b));
-const bump = (t, a, b) => Math.sin(Math.PI * seg(t, a, b));
-
-function finish(group) {
-  group.traverse((o) => { if (o.isMesh) { o.frustumCulled = false; o.castShadow = false; o.receiveShadow = true; } });
-}
-const GRIP_CURLS = [[0.3, 0.62, 0.35], [1.2, 1.5, 0.9], [1.25, 1.55, 0.9], [1.3, 1.55, 0.9]];
-const WRAP_CURLS = [[1.15, 1.5, 0.9], [1.2, 1.5, 0.9], [1.25, 1.55, 0.9], [1.3, 1.55, 0.9]];
-const CUP_CURLS = [[0.8, 1.2, 0.75], [0.85, 1.25, 0.8], [0.9, 1.25, 0.8], [0.95, 1.3, 0.8]];
-const GRIP_THUMB = { dir: [-0.62, 0.5, -0.6], bend: [-0.7, -0.6, 0.2], angle: 0.42 };
-const CUP_THUMB = { dir: [-0.2, 0.72, -0.66], bend: [-0.7, 0.2, -0.2], angle: 0.18 };
-// right hand on a pistol grip whose front strap is at (f, y)
-const gripHand = (M, f, y, extra = {}) => buildHand(M, { right: true, pos: [0.036, y + 0.02, f - 0.092], fwd: [-0.1, 0.28, 0.95], palm: [-1, 0, -0.12], elbow: [0.3, -0.42, -0.85], curls: GRIP_CURLS, thumb: GRIP_THUMB, trigger: true, ...extra });
-// left hand cupping a fore-end from below; (f, y) = centre underside
-const cupHand = (M, f, y, extra = {}) => buildHand(M, { right: false, pos: [-0.04, y - 0.017, f - 0.045], fwd: [0.8, 0.12, 0.55], palm: [0, 1, 0], elbow: [-0.36, -0.5, -0.79], curls: CUP_CURLS, thumb: CUP_THUMB, ...extra });
-
-const GRIP_PTS = [[-0.035, -0.022], [-0.09, -0.022], [-0.102, -0.034], [-0.128, -0.14], [-0.12, -0.15], [-0.082, -0.15], [-0.072, -0.11], [-0.052, -0.06], [-0.032, -0.042]];
-const shiftPts = (pts, df, dy = 0) => pts.map(([f, y]) => [f + df, y + dy]);
-const TRIGGER = [[-0.006, -0.022], [0.002, -0.022], [0.0045, -0.036], [0.0005, -0.05], [-0.0035, -0.05], [-0.002, -0.036]];
 
 // =============================================================================
 // WREN AR-6 — gas carbine: anodised receiver, free-float handguard, tan furniture, reflex sight
@@ -50,10 +30,11 @@ function buildRifle() {
   K.add(lathe([[0.0145, -0.184], [0.019, -0.183], [0.019, -0.17], [0.0145, -0.169]], 12), M.steel, 0, 0.05, 0);
   K.add(rbox(0.03, 0.044, 0.004, 0.001), M.steel, 0, 0.04, -0.167);
   // stock
-  K.add(profile([[-0.205, 0.074], [-0.375, 0.074], [-0.388, 0.062], [-0.388, -0.07], [-0.37, -0.082], [-0.35, -0.07], [-0.30, 0.0], [-0.215, 0.022], [-0.205, 0.03]], 0.042, 0.007,
+  const KS = new Kit(), KO = new Kit(); // stock and default optic are separate groups: attachments can replace them
+  KS.add(profile([[-0.205, 0.074], [-0.375, 0.074], [-0.388, 0.062], [-0.388, -0.07], [-0.37, -0.082], [-0.35, -0.07], [-0.30, 0.0], [-0.215, 0.022], [-0.205, 0.03]], 0.042, 0.007,
     [[[-0.325, 0.012], [-0.365, -0.05], [-0.352, -0.055], [-0.312, 0.002]]]), M.polyTan);
-  K.add(rbox(0.044, 0.152, 0.012, 0.004), M.rubber, 0, -0.004, -0.394);
-  K.add(rbox(0.012, 0.01, 0.05, 0.003), M.poly, 0, 0.017, -0.255);
+  KS.add(rbox(0.044, 0.152, 0.012, 0.004), M.rubber, 0, -0.004, -0.394);
+  KS.add(rbox(0.012, 0.01, 0.05, 0.003), M.poly, 0, 0.017, -0.255);
   // grip, trigger group
   K.add(profile(GRIP_PTS, 0.032, 0.009), M.gripTan);
   K.add(rbox(0.014, 0.0035, 0.08, 0.001), M.anod, 0, -0.062, 0.003);
@@ -96,21 +77,23 @@ function buildRifle() {
   K.add(rbox(0.02, 0.006, 0.04, 0.002), M.poly, 0, 0.086, 0.4);
   // micro open reflex: slim low mount, small emitter housing, thin rounded window frame (2 mm bezel)
   const OY = 0.108, LF = 0.0285;
-  K.add(rbox(0.026, 0.005, 0.044, 0.002), M.anod, 0, 0.0855, 0.012);
-  K.add(rbox(0.004, 0.008, 0.03, 0.0015), M.anod, -0.0135, 0.0835, 0.012);
-  K.add(pin(0.0026, 0.03, 6), M.steel, 0, 0.0845, 0.012);
-  K.add(rbox(0.026, 0.0095, 0.03, 0.0035, 3), M.anod, 0, 0.0925, 0.009);
-  K.add(profile([[-0.006, 0.096], [0.024, 0.096], [0.0245, 0.0995], [0.012, 0.0985]], 0.026, 0.001), M.anod); // deck rising to the window
-  K.add(section(roundRect(0.03, 0.026, 0.009, 6), LF - 0.0025, LF + 0.0025, [roundRect(0.026, 0.022, 0.007, 6).reverse()]), M.anod, 0, OY, 0);
-  K.add(rbox(0.0016, 0.004, 0.006, 0.0006), M.rubber, -0.0134, 0.0935, 0.004); K.add(rbox(0.0016, 0.004, 0.006, 0.0006), M.rubber, -0.0134, 0.0935, 0.014);
-  K.add(pin(0.0022, 0.0006, 8), M.steel, 0.0131, 0.0925, 0.009);
-  K.add(rbox(0.0006, 0.002, 0.012, 0.0002, 1), M.paintTeal, -0.0131, 0.0895, 0.009);
-  K.add(rbox(0.003, 0.002, 0.003, 0.0008), M.black, 0, 0.0975, -0.003); // emitter
+  KO.add(rbox(0.026, 0.005, 0.044, 0.002), M.anod, 0, 0.0855, 0.012);
+  KO.add(rbox(0.004, 0.008, 0.03, 0.0015), M.anod, -0.0135, 0.0835, 0.012);
+  KO.add(pin(0.0026, 0.03, 6), M.steel, 0, 0.0845, 0.012);
+  KO.add(rbox(0.026, 0.0095, 0.03, 0.0035, 3), M.anod, 0, 0.0925, 0.009);
+  KO.add(profile([[-0.006, 0.096], [0.024, 0.096], [0.0245, 0.0995], [0.012, 0.0985]], 0.026, 0.001), M.anod); // deck rising to the window
+  KO.add(section(roundRect(0.03, 0.026, 0.009, 6), LF - 0.0025, LF + 0.0025, [roundRect(0.026, 0.022, 0.007, 6).reverse()]), M.anod, 0, OY, 0);
+  KO.add(rbox(0.0016, 0.004, 0.006, 0.0006), M.rubber, -0.0134, 0.0935, 0.004); KO.add(rbox(0.0016, 0.004, 0.006, 0.0006), M.rubber, -0.0134, 0.0935, 0.014);
+  KO.add(pin(0.0022, 0.0006, 8), M.steel, 0.0131, 0.0925, 0.009);
+  KO.add(rbox(0.0006, 0.002, 0.012, 0.0002, 1), M.paintTeal, -0.0131, 0.0895, 0.009);
+  KO.add(rbox(0.003, 0.002, 0.003, 0.0008), M.black, 0, 0.0975, -0.003); // emitter
   K.build(group);
+  const stock = sub(group, 0, 0, 0); KS.build(stock);
+  const optDef = sub(group, 0, 0, 0); KO.build(optDef);
   { const mk = marking(['WREN AR-6', 'CAL 5.7x33   TESSEL ARMORY   KV-204817'], 0.085); mk.position.set(-0.0196, -0.004, -0.068); group.add(mk); }
   { const mk = marking(['SAFE      FIRE'], 0.03); mk.position.set(-0.0196, 0.0165, 0.051); group.add(mk); }
   const lensMat = redDotLens(0xff2a1a);
-  const lens = new THREE.Mesh(new THREE.PlaneGeometry(0.0265, 0.0225), lensMat); lens.position.set(0, OY, -LF); lens.rotation.x = -0.05; group.add(lens);
+  const lens = new THREE.Mesh(new THREE.PlaneGeometry(0.0265, 0.0225), lensMat); lens.position.set(0, OY, -LF); lens.rotation.x = -0.05; optDef.add(lens);
 
   // moving parts
   const mag = sub(group, 0, 0, 0);
@@ -134,6 +117,11 @@ function buildRifle() {
   finish(group);
   return {
     group, muzzle, eject, sight: [0, OY, LF], lens: { kind: 'dot', mat: lensMat },
+    mounts: {
+      muzzle: { r: 0.0118 }, optic: { y: 0.083, f: 0.012, front: 0.4, def: optDef },
+      mag: { group: mag, y: -0.166, f: 0.116, ang: 0.41, w: 0.028, d: 0.066, well: [0.085, -0.03] },
+      under: { y: BY - 0.031, f: 0.395 }, side: { x: -0.0225, y: BY + 0.0225, f: 0.36 }, stock: { group: stock, y: 0.05, f: -0.2 },
+    },
     animate(s, out) {
       const rc = bump(s.cycle, 0, 0.075);
       let cz = 0.075 * rc;
@@ -227,6 +215,7 @@ function buildShotgun() {
   finish(group);
   return {
     group, muzzle, eject, sight: [0, SY, -0.06], lens: null,
+    mounts: { muzzle: { r: 0.0113 }, optic: { y: 0.074, f: 0.05 }, tube: { y: 0.02, f: 0.628, r: 0.0128 }, side: { x: -0.02, y: 0.03, f: 0.56 } },
     animate(s, out) {
       const c = s.cycle;
       let pz = (s.mag > 0 || c < 0.5) ? eseg(c, 0.1, 0.23) - eseg(c, 0.27, 0.42) : 0;
@@ -341,6 +330,7 @@ function buildSniper() {
   finish(group);
   return {
     group, muzzle, eject, sight: [0, SY, -0.2145], lens: { kind: 'scope', mat: lensMat }, body, eyeR: 0.0318,
+    mounts: { muzzle: { r: 0.0125, parent: body }, mag: { group: mag, y: -0.091, f: 0.05, ang: 0, w: 0.03, d: 0.088 } },
     animate(s, out) {
       squeeze(hr.index, s.trigger);
       let lift = 0, pull = 0, rx = 0, ry = 0, rf = 0;
@@ -533,6 +523,10 @@ function buildPistol() {
   let wasEmpty = false;
   return {
     group, muzzle, eject, sight: [0, SY + 0.0016, -0.066], lens: null,
+    mounts: {
+      muzzle: { r: 0.0066, small: true }, optic: { y: 0.0455, f: -0.036, parent: slide, scale: 0.72 },
+      mag: { group: mag, y: -0.13, f: -0.081, ang: -0.22, w: 0.027, d: 0.05, pistol: true }, rail: { y: -0.004, f: 0.082 },
+    },
     animate(s, out) {
       squeeze(hr.index, s.trigger);
       // slide: reciprocates on every shot, locks back on an empty magazine until the reload releases it
@@ -559,13 +553,21 @@ function buildPistol() {
   };
 }
 
-const BUILDERS = { pistol: buildPistol, rifle: buildRifle, shotgun: buildShotgun, sniper: buildSniper, launcher: buildLauncher };
+const BUILDERS = { pistol: buildPistol, rifle: buildRifle, shotgun: buildShotgun, sniper: buildSniper, launcher: buildLauncher,
+  handcannon: buildHandcannon, lmg: buildLmg, lever: buildLever, crossbow: buildCrossbow };
 // variants reuse a model with a different finish (materials are cloned so the original gun keeps its colours)
 const MODEL_FOR = { smg: ['rifle', [1.5, 1.28, 0.85]], dmr: ['rifle', [0.82, 1.12, 0.72]], slug_shotgun: ['shotgun', [1.2, 0.72, 0.78]] };
+// Every viewmodel comes back with `body` (hidden while the eye is at a telescopic sight) inside `group`,
+// and `mounts` (where attachments go, see attachparts.js).
+function wrap(vm) {
+  if (!vm.body) { const outer = new THREE.Group(); outer.add(vm.group); vm.body = vm.group; vm.group = outer; }
+  if (!vm.mounts) vm.mounts = {};
+  return vm;
+}
 export function buildViewmodel(id) {
   const variant = MODEL_FOR[id];
-  if (!variant) return BUILDERS[id]();
-  const vm = BUILDERS[variant[0]](), [r, g, b] = variant[1], done = new Map();
+  if (!variant) return wrap(BUILDERS[id]());
+  const vm = wrap(BUILDERS[variant[0]]()), [r, g, b] = variant[1], done = new Map();
   vm.group.traverse((o) => {
     if (!o.isMesh || !o.material || !o.material.isMeshStandardMaterial || o.material.emissiveIntensity > 1) return;
     if (!done.has(o.material)) { const m = o.material.clone(); m.color.setRGB(m.color.r * r, m.color.g * g, m.color.b * b); done.set(o.material, m); }

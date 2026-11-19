@@ -42,6 +42,8 @@ const CSS = `
 #wp-health.wp-low #wp-hpn{color:#ff6a5c}
 #wp-ammo{right:28px;bottom:22px;text-align:right}
 #wp-name{font-size:13px;font-weight:700;letter-spacing:3px}
+#wp-att{display:flex;justify-content:flex-end;gap:4px;margin-bottom:5px;min-height:0}
+#wp-att span{font-size:9px;font-weight:700;letter-spacing:1.5px;padding:2px 5px 1px;background:rgba(8,12,16,.6);border-bottom:2px solid var(--wp-accent);color:#fff}
 #wp-tag{font-size:10px;letter-spacing:2.5px;opacity:.6;text-transform:uppercase;margin-bottom:2px}
 #wp-count{display:flex;justify-content:flex-end;align-items:baseline;gap:8px;line-height:1}
 #wp-mag{font-size:60px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-1px;display:inline-block;transform-origin:100% 80%}
@@ -56,7 +58,7 @@ const CSS = `
 #wp-gren i{width:11px;height:11px;border-radius:50%;border:2px solid #fff;position:relative;overflow:hidden;opacity:.45}
 #wp-gren i.wp-on{background:#ff7a4a;border-color:#ff7a4a;opacity:1;box-shadow:0 0 8px #ff7a4a}
 #wp-gren i u{position:absolute;left:0;right:0;bottom:0;background:#fff;opacity:.7}
-#wp-slots{right:28px;bottom:150px;display:flex;flex-direction:column;gap:3px;align-items:flex-end}
+#wp-slots{right:28px;bottom:172px;display:flex;flex-direction:column;gap:3px;align-items:flex-end}
 #wp-slots div{font-size:10px;letter-spacing:2px;padding:3px 8px 3px 6px;background:rgba(8,12,16,.42);opacity:.5;border-right:2px solid transparent;display:flex;gap:8px}
 #wp-slots div b{opacity:.7}
 #wp-slots div.wp-cur{opacity:1;border-right-color:var(--wp-accent);background:rgba(8,12,16,.7)}
@@ -102,14 +104,14 @@ export function createHud(ctx, weapons) {
   const slotEls = weapons.map((w, i) => { const d = el('div', null, slots); d.innerHTML = `<span>${w.name}</span><b>${i + 1}</b>`; return d; });
 
   const ammo = el('div', 'wp-ammo', root, 'wp-panel');
-  ammo.innerHTML = '<div id="wp-tag"></div><div id="wp-name"></div><div id="wp-count"><span id="wp-mag">0</span><span id="wp-res">0</span></div><div id="wp-bar"><div></div></div>'
+  ammo.innerHTML = '<div id="wp-att"></div><div id="wp-tag"></div><div id="wp-name"></div><div id="wp-count"><span id="wp-mag">0</span><span id="wp-res">0</span></div><div id="wp-bar"><div></div></div>'
     + '<div id="wp-meta"><div id="wp-gren"><span>G</span></div><div id="wp-mode"></div></div>';
   const q = (s) => ammo.querySelector(s);
-  const nameEl = q('#wp-name'), tagEl = q('#wp-tag'), magEl = q('#wp-mag'), resEl = q('#wp-res'), barEl = q('#wp-bar div'), modeEl = q('#wp-mode'), grenEl = q('#wp-gren');
+  const attEl = q('#wp-att'), nameEl = q('#wp-name'), tagEl = q('#wp-tag'), magEl = q('#wp-mag'), resEl = q('#wp-res'), barEl = q('#wp-bar div'), modeEl = q('#wp-mode'), grenEl = q('#wp-gren');
   const grenPips = [];
   const score = createScoreHud(ctx, root);
 
-  const S = { hsT: 9, killHead: false, hitT: 9, hitDur: 0.2, head: false, kill: false, killT: 9, hitOn: false, hitCol: '', hitKill: null, stagT: 9, stagOn: false, stagBreak: false, dry: [], lock: [], magPop: 0, ghost: 1, hurt: 0, lastMag: -1, lastRes: -1, lastHp: -1, lastName: '', lastMode: '', gap: 20, lastIdx: -1 };
+  const S = { hsT: 9, killHead: false, hitT: 9, hitDur: 0.2, head: false, kill: false, killT: 9, hitOn: false, hitCol: '', hitKill: null, stagT: 9, stagOn: false, stagBreak: false, dry: [], lock: [], magPop: 0, ghost: 1, hurt: 0, lastMag: -1, lastRes: -1, lastHp: -1, lastName: '', lastAtt: null, lastMode: '', gap: 20, lastIdx: -1 };
   const tx = (e, x, y, extra = '') => { e.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px)${extra}`; };
 
   return {
@@ -138,7 +140,7 @@ export function createHud(ctx, weapons) {
       const p = ctx.player, w = st.w;
       // ---- crosshair ---------------------------------------------------------
       S.gap += (st.spreadPx - S.gap) * (1 - Math.exp(-40 * dt));
-      const isShot = w.id === 'shotgun', isLaunch = w.id === 'launcher';
+      const isShot = w.pellets > 1, isLaunch = w.id === 'launcher';
       const gap = Math.max(isShot ? 10 : 5, S.gap) + (isShot ? 0 : 4);
       const chAlpha = st.hidden ? 0 : Math.max(0, 1 - st.ads * 3.2) * (1 - 0.75 * st.sprint);
       cross.style.opacity = chAlpha.toFixed(2);
@@ -180,7 +182,7 @@ export function createHud(ctx, weapons) {
       if (st.reload >= 0) hintTxt = 'RELOADING';
       else if (st.mag === 0 && st.reserve === 0) { hintTxt = 'NO AMMO'; hintCls = 'wp-bad'; }
       else if (st.mag === 0) { hintTxt = 'RELOAD  [R]'; hintCls = 'wp-bad'; }
-      else if (st.mag <= Math.max(1, Math.floor(w.mag * 0.25)) && st.reserve > 0) { hintTxt = 'LOW AMMO'; hintCls = 'wp-warn'; }
+      else if (w.mag > 2 && st.mag <= Math.max(1, Math.floor(w.mag * 0.25)) && st.reserve > 0) { hintTxt = 'LOW AMMO'; hintCls = 'wp-warn'; }
       if (hintTxt !== hint.textContent) hint.textContent = hintTxt;
       hint.className = hintCls;
       hint.style.opacity = hintTxt && !(st.ads > 0.5) ? (hintCls === 'wp-bad' ? 0.65 + 0.35 * Math.sin(ctx.time * 9) : 0.85).toFixed(2) : '0';
@@ -200,12 +202,14 @@ export function createHud(ctx, weapons) {
         slotEls.forEach((d, i) => d.classList.toggle('wp-cur', i === st.idx));
         S.lastMag = -1;
       }
+      // fitted attachments: one short chip each (muzzle, optic, magazine, grip, stock order)
+      if (st.att !== S.lastAtt) { S.lastAtt = st.att; attEl.innerHTML = st.att ? st.att.split('  ').map((t) => `<span>${t}</span>`).join('') : ''; }
       if (st.mag !== S.lastMag) { if (S.lastMag >= 0) S.magPop = 1; S.lastMag = st.mag; magEl.textContent = st.mag; }
       if (st.reserve !== S.lastRes) { S.lastRes = st.reserve; resEl.textContent = st.reserve; }
       S.magPop = Math.max(0, S.magPop - dt * 9);
       magEl.style.transform = `scale(${(1 + S.magPop * 0.13).toFixed(3)})`;
       barEl.style.transform = `scaleX(${Math.min(1, st.mag / w.mag).toFixed(3)})`;
-      const low = st.mag <= Math.max(1, Math.floor(w.mag * 0.25));
+      const low = w.mag > 2 && st.mag <= Math.max(1, Math.floor(w.mag * 0.25));
       ammo.className = 'wp-panel' + (st.mag === 0 ? ' wp-empty' : low ? ' wp-low' : '');
       if (st.mode !== S.lastMode) { S.lastMode = st.mode; modeEl.textContent = st.mode.toUpperCase() + (w.modes.length > 1 ? '  [B]' : ''); }
       for (let i = 0; i < st.inv.length; i++) {

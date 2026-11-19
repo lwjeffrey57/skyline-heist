@@ -32,7 +32,7 @@ const UPGRADES = [
   { id: 'pouch', key: 'KeyB', label: 'B', name: 'Secure pouch', desc: 'Your most valuable item survives if you die', cost: 2000 },
 ];
 // weapons you can own: extract with one and it joins your armoury; bring it on a raid and it is at risk
-const GUNS = [['rifle', 'Digit2', '2', 900], ['shotgun', 'Digit3', '3', 700], ['sniper', 'Digit4', '4', 1200], ['launcher', 'Digit5', '5', 1500], ['smg', 'Digit6', '6', 700], ['dmr', 'Digit7', '7', 1100], ['slug_shotgun', 'Digit8', '8', 800]];
+const GUNS = [['handcannon', '', '', 1000], ['lmg', '', '', 1600], ['lever', '', '', 950], ['crossbow', '', '', 1300], ['rifle', 'Digit2', '2', 900], ['shotgun', 'Digit3', '3', 700], ['sniper', 'Digit4', '4', 1200], ['launcher', 'Digit5', '5', 1500], ['smg', 'Digit6', '6', 700], ['dmr', 'Digit7', '7', 1100], ['slug_shotgun', 'Digit8', '8', 800]];
 // Contracts: two are offered each raid; a completed one pays its bonus only if you extract.
 // count contracts tick up from events; check contracts are judged from the raid's state (live, and at extraction).
 const CONTRACTS = [
@@ -84,10 +84,20 @@ function rollItem(luck) {
   const pool = ITEMS.filter((i) => i.tier === tier);
   return { ...pool[Math.floor(Math.random() * pool.length)] };
 }
+// weapon attachments turn up in containers: a pack item you can fit to a gun once you get it home
+const ATTACH = [];
+function rollAttachment(luck) {
+  const wt = { common: 10, uncommon: 6 * luck, rare: 2.2 * luck, epic: 0.7 * luck };
+  let total = 0; for (const a of ATTACH) total += wt[a.tier] || 1;
+  let r = Math.random() * total, pickA = ATTACH[0];
+  for (const a of ATTACH) { r -= wt[a.tier] || 1; if (r <= 0) { pickA = a; break; } }
+  return { att: pickA.id, name: pickA.name, tier: pickA.tier, value: Math.round(pickA.price * 0.4) };
+}
 function rollContents(kind) {
   const c = CRATES[kind], n = Math.round(rnd(c.rolls[0], c.rolls[1])), out = [];
   for (let i = 0; i < n; i++) {
     if (Math.random() < 0.03) { const size = Math.random() < 0.25 ? 8 : 4; out.push({ supply: 'bag', size, name: BAGS[size].name }); continue; }
+    if (ATTACH.length && Math.random() < 0.04 * Math.min(2, c.luck)) { out.push(rollAttachment(c.luck)); continue; }
     const r = Math.random();
     if (r < 0.14) out.push({ supply: 'medkit', name: 'Medkit' });
     else if (r < 0.26) out.push({ supply: 'armor', name: 'Armour plate' });
@@ -98,6 +108,7 @@ function rollContents(kind) {
 }
 
 export function init(ctx) {
+  if (ctx.weapons && ctx.weapons.attachments) { ATTACH.length = 0; ATTACH.push(...ctx.weapons.attachments); }
   const { player, world, events, input, scene, camera } = ctx;
   const stash = loadStash();
   let tick = 0, tick10 = 0, reloading = false;
@@ -238,7 +249,7 @@ export function init(ctx) {
     }
     for (const [x, z] of [[-9, 26], [44, 9], [-54, 5], [10, -44], [-10, -40], [52, -46], [-56, -36], [3, 4.5], [-4.5, -3], [30, 40], [-40, 12], [20, -4]]) spots.push(['standard', x, 0, z]);
     // arms lockers: one on the top floor of five random buildings, each holding a weapon you did not deploy with
-    const found = ['rifle', 'shotgun', 'sniper', 'launcher', 'smg', 'dmr', 'slug_shotgun'].sort(() => Math.random() - 0.5);
+    const found = ['rifle', 'shotgun', 'sniper', 'launcher', 'smg', 'dmr', 'slug_shotgun', 'handcannon', 'lmg', 'lever', 'crossbow'].sort(() => Math.random() - 0.5);
     const outpost = (type) => world.buildings.find((b) => b.outpost === type);
     const armoury = outpost('armoury'), sites = armoury ? [[armoury, 1], [armoury, -1]] : [];
     for (const b of world.buildings.filter((b) => !b.outpost).sort(() => Math.random() - 0.5).slice(0, armoury ? 3 : 5)) sites.push([b, 1]);
@@ -426,6 +437,11 @@ export function init(ctx) {
       const sidearm = inv.find((v) => v.def.id === 'pistol'); if (sidearm) sidearm.def.suppressed = !!stash.upgrades.suppressor;
       // weapons chosen on the stash screen leave the armoury now; they only come back if you extract
       for (const it of stash.w || []) { const slot = it && inv.find((v) => v.def.id === it.id); if (slot) { slot.locked = false; brought.add(it.id); } }
+      if (ctx.weapons.setAttachments) for (const v of inv) { // fit what the stash says is on each gun; guns found in the raid are bare
+        const names = ctx.weapons.slotsFor(v.def.id), fitted = (stash.att && stash.att[v.def.id]) || [], set = {};
+        if (!v.locked) names.forEach((sn, i) => { if (fitted[i]) set[sn] = fitted[i].id; });
+        ctx.weapons.setAttachments(v.def.id, set, { fill: true });
+      }
       saveStash(stash);
       ctx.weapons.switchTo(inv.findIndex((v) => v.def.id === start), true);
     }
@@ -454,7 +470,7 @@ export function init(ctx) {
       stash.streak = (stash.streak || 0) + 1; stash.bestStreak = Math.max(stash.bestStreak || 0, stash.streak); stash.tutorialDone = true;
       // the haul stays in your pack for you to sort; unused medkits you brought come back; found weapons go to the stash
       if (foundBag) { const old = stash.b && stash.b[0]; stash.b = [{ t: 'bag', size: foundBag }]; if (old) menu.addToStash(old); } // the bigger backpack is now yours
-      const back = items.map((i) => ({ t: 'loot', name: i.name, tier: i.tier, value: i.value }));
+      const back = items.map((i) => (i.att ? { t: 'att', id: i.att } : { t: 'loot', name: i.name, tier: i.tier, value: i.value }));
       for (let n = Math.min(broughtMed, Math.max(0, medkits - baseMed())); n > 0; n--) back.push({ t: 'med' });
       stash.pack = back; menu.normalise();
       for (const extra of stash.pack.splice(packSize())) if (extra) menu.addToStash(extra);
@@ -462,8 +478,9 @@ export function init(ctx) {
       if (stash.streak >= 3) bump(stash, 'streak3');
       chime([520, 660, 780, 1040, 1320], 0.09, 0.45, 0.2);
     } else {
+      for (const w of stash.w || []) if (w && stash.att) delete stash.att[w.id]; // what was fitted to a lost gun is lost with it
       stash.lost++; stash.streak = 0; stash.pack = []; stash.w = [null, null]; stash.b = [null];
-      if (stash.upgrades.pouch && items.length) { result.saved = items[0]; menu.addToStash({ t: 'loot', name: items[0].name, tier: items[0].tier, value: items[0].value }); }
+      if (stash.upgrades.pouch && items.length) { result.saved = items[0]; menu.addToStash(items[0].att ? { t: 'att', id: items[0].att } : { t: 'loot', name: items[0].name, tier: items[0].tier, value: items[0].value }); }
       result.guns = [...new Set([...raidGuns, ...brought])].map(nameOf);
       menu.normalise();
       chime([330, 262, 196], 0.14, 0.4, 0.16, 'sawtooth');
