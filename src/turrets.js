@@ -66,7 +66,7 @@ export function init(ctx) {
       const side = Math.random() < 0.5 ? -3 : 3, inward = 2.5; // inside the gateway itself, so the wall never blocks its view out
       out.push(gz === 0 ? [gx - Math.sign(gx) * inward, side, yaw] : [gx + side, gz - Math.sign(gz) * inward, yaw]);
     }
-    for (const b of world.buildings) if (b.outpost) { const sx = Math.random() < 0.5 ? -1 : 1, sz = Math.random() < 0.5 ? -1 : 1; out.push([b.x + sx * 10.5, b.z + sz * 10.5, Math.atan2(sx, sz)]); }
+    for (const b of world.buildings) if (b.outpost && !b.baseY) { const sx = Math.random() < 0.5 ? -1 : 1, sz = Math.random() < 0.5 ? -1 : 1; out.push([b.x + sx * 10.5, b.z + sz * 10.5, Math.atan2(sx, sz)]); }
     return out.filter(([x, z]) => player.free(x, 0.01, z, 1.6)).sort(() => Math.random() - 0.5);
   }
   function deploy(n) {
@@ -91,7 +91,7 @@ export function init(ctx) {
         const keep = b.keep || [[b.x - 4.4, b.x + 4.4, b.z - 3.3, b.z + 3.3]];
         if (keep.some(([a0, a1, c0, c1]) => x > a0 && x < a1 && z > c0 && z < c1)) continue;
         if (Math.hypot(x - player.pos.x, z - player.pos.z) < 30) continue;
-        if (add(x, z, Math.random() * Math.PI * 2)) { placed++; break; }
+        if (add(x, z, Math.random() * Math.PI * 2, b.baseY || 0)) { placed++; break; }
       }
     }
   }
@@ -149,11 +149,11 @@ export function init(ctx) {
   }
 
   // put one turret at a chosen spot (used for high-threat locations); skipped if one already stands there
-  function add(x, z, yaw) {
-    if (!player.free(x, 0.01, z, 1.6) || list.some((o) => o.alive && Math.hypot(o.pos.x - x, o.pos.z - z) < 4)) return false;
+  function add(x, z, yaw, y = 0) {
+    if (!player.free(x, y + 0.01, z, 1.6) || list.some((o) => o.alive && Math.hypot(o.pos.x - x, o.pos.z - z) < 4)) return false;
     const t = list.find((o) => !o.alive) || make();
-    t.pos.set(x, 0, z); t.c.set(x, 1.25, z); t.base = t.yaw = yaw; t.hp = CFG.hp; t.alive = true; t.awareness = 0; t.alertState = 'unaware'; t.lastSeen = 99;
-    t.eye.emissive.setHex(EYE.unaware); t.beam.color.setHex(EYE.unaware); t.beam.opacity = 0.05; t.group.position.set(x, 0, z); t.group.visible = true; return true;
+    t.pos.set(x, y, z); t.c.set(x, y + 1.25, z); t.base = t.yaw = yaw; t.hp = CFG.hp; t.alive = true; t.awareness = 0; t.alertState = 'unaware'; t.lastSeen = 99;
+    t.eye.emissive.setHex(EYE.unaware); t.beam.color.setHex(EYE.unaware); t.beam.opacity = 0.05; t.group.position.set(x, y, z); t.group.visible = true; return true;
   }
   ctx.turrets = { list, config: CFG, deploy, add };
   return { update };

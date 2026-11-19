@@ -140,13 +140,14 @@ export function createWorld(scene, renderer) {
     return [x, z];
   }
   const anyStair = () => { const r = rand(); return r < 0.25 ? 'centre' : r < 0.6 ? 'corner' : r < 0.8 ? 'endX' : 'endZ'; };
-  function building(x, z, w, d, floors, accent, stair = 'centre') {
+  // base: the height of the ground the building stands on (a raised plateau), 0 on the flat
+  function building(x, z, w, d, floors, accent, stair = 'centre', base = 0) {
     const first = colliders.length;
     const x0 = x - w / 2, x1 = x + w / 2, z0 = z - d / 2, z1 = z + d / 2;
     const [cx, cz] = stairSpot(x, z, w, d, stair);
     const hx0 = cx - 2.7, hx1 = cx + 2.7;
     for (let f = 0; f < floors; f++) {
-      const y0 = f * FH;
+      const y0 = base + f * FH;
       wallRun(true, z0 + T / 2, x0, x1, y0, f === 0, accent);
       wallRun(true, z1 - T / 2, x0, x1, y0, f === 0, accent);
       wallRun(false, x0 + T / 2, z0 + T, z1 - T, y0, f === 0, accent);
@@ -170,13 +171,13 @@ export function createWorld(scene, renderer) {
       slab(hx0, hx1, iz0, lz0); slab(hx0, hx1, lz1, iz1);
     }
     // roof parapet
-    const ry = floors * FH;
+    const ry = base + floors * FH;
     const front = addBox(x, ry, z0 + T / 2, w, 1.0, T, M.concrete, B('parapet'));
     addBox(x, ry, z1 - T / 2, w, 1.0, T, M.concrete, B('parapet'));
     addBox(x0 + T / 2, ry, z, T, 1.0, d - T * 2, M.concrete, B('parapet'));
     addBox(x1 - T / 2, ry, z, T, 1.0, d - T * 2, M.concrete, B('parapet'));
     addBox(x, ry + 1.0, z0 + T / 2, w, 0.06, T + 0.04, accent === M.teal ? M.glowTeal : M.glowAmber, { solid: false, shadow: false, attachTo: front });
-    buildings.push({ x, z, w, d, floors, floorHeight: FH, wallThickness: T, roofY: ry, accent, stairAt: [cx, cz], keep: stair === 'centre' ? null : [[cx - 4.4, cx + 4.4, cz - 3.3, cz + 3.3]] });
+    buildings.push({ x, z, w, d, floors, floorHeight: FH, wallThickness: T, roofY: ry, baseY: base, accent, stairAt: [cx, cz], keep: stair === 'centre' ? null : [[cx - 4.4, cx + 4.4, cz - 3.3, cz + 3.3]] });
     lod.push({ x, z, far: false, meshes: colliders.slice(first).filter((c) => c.tag === 'stair' || (c.tag === 'slab' && c.max.y < ry - 0.1)).map((c) => c.mesh) });
     return ry;
   }

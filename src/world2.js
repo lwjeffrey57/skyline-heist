@@ -47,6 +47,20 @@ export function createWorld(scene, renderer) {
   const pads = [];
   const ziplines = [];
   const M = createMaterials(renderer);
+  // Blockout surfaces: flat colour over a one-metre grid, so scale reads at a glance and nothing looks finished.
+  // Walls are pale, floors mid-grey, the ground dark, cover a warm yellow so it stands out, districts their own colour.
+  {
+    const gridTex = (() => {
+      const S2 = 256, cv = document.createElement('canvas'); cv.width = cv.height = S2; const g2 = cv.getContext('2d');
+      g2.fillStyle = '#ffffff'; g2.fillRect(0, 0, S2, S2);
+      g2.strokeStyle = 'rgba(0,0,0,.16)'; g2.lineWidth = 2; for (let i = 0; i <= 4; i++) { g2.beginPath(); g2.moveTo(i * 64, 0); g2.lineTo(i * 64, S2); g2.moveTo(0, i * 64); g2.lineTo(S2, i * 64); g2.stroke(); }
+      g2.strokeStyle = 'rgba(0,0,0,.3)'; g2.lineWidth = 4; g2.strokeRect(0, 0, S2, S2);
+      const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t;
+    })();
+    const flat = (hex, rough = 0.92) => new THREE.MeshStandardMaterial({ color: hex, map: gridTex, roughness: rough, metalness: 0 });
+    Object.assign(M, { ground: flat(0x4d5257), concrete: flat(0xc9c5bb), concreteDark: flat(0x8d9199), slab: flat(0xa7a9a6),
+      rust: flat(0xc8553a), navy: flat(0x3f6aa8), teal: flat(0x3fa89a), amber: flat(0xe0a23a), cream: flat(0xe6dcc0) });
+  }
   // The layout is rolled fresh on every page load (add ?seed=123 to the address to pin one).
   const seedParam = /[?&]seed=(\d+)/.exec(typeof location !== 'undefined' ? location.search : '');
   const seed = seedParam ? Number(seedParam[1]) >>> 0 : 20261119; // a fixed, hand-designed layout: the same every raid
@@ -139,13 +153,14 @@ export function createWorld(scene, renderer) {
     return [x, z];
   }
   const anyStair = () => { const r = rand(); return r < 0.25 ? 'centre' : r < 0.6 ? 'corner' : r < 0.8 ? 'endX' : 'endZ'; };
-  function building(x, z, w, d, floors, accent, stair = 'centre') {
+  // base: the height of the ground the building stands on (a raised plateau), 0 on the flat
+  function building(x, z, w, d, floors, accent, stair = 'centre', base = 0) {
     const first = colliders.length;
     const x0 = x - w / 2, x1 = x + w / 2, z0 = z - d / 2, z1 = z + d / 2;
     const [cx, cz] = stairSpot(x, z, w, d, stair);
     const hx0 = cx - 2.7, hx1 = cx + 2.7;
     for (let f = 0; f < floors; f++) {
-      const y0 = f * FH;
+      const y0 = base + f * FH;
       wallRun(true, z0 + T / 2, x0, x1, y0, f === 0, accent);
       wallRun(true, z1 - T / 2, x0, x1, y0, f === 0, accent);
       wallRun(false, x0 + T / 2, z0 + T, z1 - T, y0, f === 0, accent);
@@ -169,13 +184,13 @@ export function createWorld(scene, renderer) {
       slab(hx0, hx1, iz0, lz0); slab(hx0, hx1, lz1, iz1);
     }
     // roof parapet
-    const ry = floors * FH;
+    const ry = base + floors * FH;
     const front = addBox(x, ry, z0 + T / 2, w, 1.0, T, M.concrete, B('parapet'));
     addBox(x, ry, z1 - T / 2, w, 1.0, T, M.concrete, B('parapet'));
     addBox(x0 + T / 2, ry, z, T, 1.0, d - T * 2, M.concrete, B('parapet'));
     addBox(x1 - T / 2, ry, z, T, 1.0, d - T * 2, M.concrete, B('parapet'));
     addBox(x, ry + 1.0, z0 + T / 2, w, 0.06, T + 0.04, accent === M.teal ? M.glowTeal : M.glowAmber, { solid: false, shadow: false, attachTo: front });
-    buildings.push({ x, z, w, d, floors, floorHeight: FH, wallThickness: T, roofY: ry, accent, stairAt: [cx, cz], keep: stair === 'centre' ? null : [[cx - 4.4, cx + 4.4, cz - 3.3, cz + 3.3]] });
+    buildings.push({ x, z, w, d, floors, floorHeight: FH, wallThickness: T, roofY: ry, baseY: base, accent, stairAt: [cx, cz], keep: stair === 'centre' ? null : [[cx - 4.4, cx + 4.4, cz - 3.3, cz + 3.3]] });
     lod.push({ x, z, far: false, meshes: colliders.slice(first).filter((c) => c.tag === 'stair' || (c.tag === 'slab' && c.max.y < ry - 0.1)).map((c) => c.mesh) });
     return ry;
   }
@@ -365,10 +380,28 @@ export function createWorld(scene, renderer) {
       for (const sd of [-1, 1]) for (let s = 0; s < n; s++) addBox(cx + sd * (w / 2 + run * (n - s - 0.5)), 0, cz, run, (h / n) * (s + 1), Math.min(d, 5), M.concreteDark, { tag: 'stair' });
       for (const sz of [-1, 1]) addBox(cx, h, cz + sz * (d / 2 - 0.2), w, 1.0, 0.4, M.concrete, cover);
     };
-    const outpost = (x, z, w, d, floors, type, accent, stair = 'corner') => {
-      building(x, z, w, d, floors, accent, stair);
+    // raised ground: a flat-topped plateau with broad steps up the sides you name ('n', 's', 'e', 'w')
+    const plateau = (cx, cz, w, d, h, sides) => {
+      addBox(cx, 0, cz, w, h, d, M.slab, { tag: 'slab' });
+      const n = Math.ceil(h / 0.3), run = 0.55, wide = 8;
+      for (const sd of sides) for (let s2 = 0; s2 < n; s2++) {
+        const out = run * (n - s2 - 0.5), hh = (h / n) * (s2 + 1);
+        if (sd === 'n') addBox(cx, 0, cz - d / 2 - out, wide, hh, run, M.concreteDark, { tag: 'stair' });
+        if (sd === 's') addBox(cx, 0, cz + d / 2 + out, wide, hh, run, M.concreteDark, { tag: 'stair' });
+        if (sd === 'w') addBox(cx - w / 2 - out, 0, cz, run, hh, wide, M.concreteDark, { tag: 'stair' });
+        if (sd === 'e') addBox(cx + w / 2 + out, 0, cz, run, hh, wide, M.concreteDark, { tag: 'stair' });
+      }
+      for (const [ex, ez, ew, ed] of [[cx, cz - d / 2 + 0.2, w, 0.4], [cx, cz + d / 2 - 0.2, w, 0.4], [cx - w / 2 + 0.2, cz, 0.4, d], [cx + w / 2 - 0.2, cz, 0.4, d]]) { // a low wall round the edge, open where the steps are
+        const side = ed < 1 ? (ez < cz ? 'n' : 's') : (ex < cx ? 'w' : 'e');
+        if (!sides.includes(side)) { addBox(ex, h, ez, ew, 1.0, ed, M.concrete, cover); continue; }
+        const along = ed < 1, len = (along ? w : d), seg = (len - wide - 1) / 2;
+        for (const q of [-1, 1]) { const off = q * (wide / 2 + 0.5 + seg / 2); if (along) addBox(cx + off, h, ez, seg, 1.0, 0.4, M.concrete, cover); else addBox(ex, h, cz + off, 0.4, 1.0, seg, M.concrete, cover); }
+      }
+    };
+    const outpost = (x, z, w, d, floors, type, accent, stair = 'corner', base = 0) => {
+      building(x, z, w, d, floors, accent, stair, base);
       buildings[buildings.length - 1].outpost = type;
-      for (const [sx, sz] of [[-1, -1], [1, 1]]) { // two corner walls: a yard with open sides
+      if (!base) for (const [sx, sz] of [[-1, -1], [1, 1]]) { // two corner walls: a yard with open sides
         const m1 = addBox(x + sx * (w / 2 + 4), 0, z + sz * (d / 2 + 1), 0.35, 1.7, 10, M.concrete, cover), m2 = addBox(x + sx * (w / 2 - 0.5), 0, z + sz * (d / 2 + 6), 9, 1.7, 0.35, M.concrete, cover);
         compoundWalls.push(m1.userData.collider, m2.userData.collider);
       }
@@ -420,7 +453,7 @@ export function createWorld(scene, renderer) {
       [-97, -87, -77, -67].forEach((z, r) => { let i = 0; for (let x = -76; x <= -14; x += 8.6, i++) { if ((i * 3 + r * 5) % 7 === 0 || (i * 3 + r * 5) % 7 === 3 || Math.hypot(x + 50, z + 103) < 17) continue; cont(x, z, true, MATS[(i + r) % 6], (i + r) % 3 === 0 ? MATS[(i + r + 2) % 6] : null); } });
     }
     outpost(-92, -92, 12, 10, 2, 'signal', M.rust);
-    outpost(92, -92, 12, 10, 2, 'watch', M.navy, 'endX');
+    plateau(92, -92, 26, 24, 3.0, ['w', 's']); outpost(92, -92, 12, 10, 2, 'watch', M.navy, 'endX', 3.0); // the watch post stands on a hill: the highest ground on the site
     warehouse(46, -80, 32, 22);
     { // the quiet way: a walled service alley from the edge to the breach, roofed over in the middle
       for (const x of [13.6, 19.4]) for (const [z0, z1] of x > 15 ? [[-100, -76], [-72, -52]] : [[-100, -76], [-76, -52]]) addBox(x, 0, (z0 + z1) / 2, 0.4, 3.2, z1 - z0, M.concrete, { tag: 'wall', destructible: true });
@@ -428,7 +461,7 @@ export function createWorld(scene, renderer) {
       block(15.2, -90); block(17.8, -62);
     }
     checkpoint(0, -76, false);
-    for (const [x, z, r] of [[-62, -56, 0], [-44, -55, 1], [-12, -58, 2], [30, -57, 3], [62, -60, 0], [84, -64, 1], [74, -100, 2], [-40, -105, 3]]) cluster(x, z, r);
+    for (const [x, z, r] of [[-62, -56, 0], [-44, -55, 1], [-12, -58, 2], [30, -57, 3], [62, -60, 0], [84, -64, 1], [-40, -105, 3]]) cluster(x, z, r);
 
     // ---- EAST: the Exchange — the office campus, two wings joined by bridges over the road ---------------------
     {
@@ -455,16 +488,25 @@ export function createWorld(scene, renderer) {
       for (const [bx] of BR) { main.keep.push([bx - 2.3, bx + 2.3, gap, gap + 7.4]); annex.keep.push([bx - 2.3, bx + 2.3, -gap - 7.4, -gap]); }
       checkpoint(cx - 22, 0, true); checkpoint(cx + 23, 0, true);
       // the quiet way: a screened lane between the inner wall and the main wing, ending at the breach
-      addBox(55, 0, 22, 0.4, 3, 20, M.concrete, { tag: 'wall', destructible: true }); addBox(55, 0, 44, 0.4, 3, 16, M.concrete, { tag: 'wall', destructible: true });
+      // the service arcade: in from the east edge along a walled lane south of the main wing, then north under a roofed gallery
+      const wl = (x0, x1, z0, z1) => addBox((x0 + x1) / 2, 0, (z0 + z1) / 2, Math.max(0.4, x1 - x0), 3.2, Math.max(0.4, z1 - z0), M.concrete, { tag: 'wall', destructible: true });
+      wl(54.8, 55.2, 12, 32); wl(54.8, 55.2, 36, 54.8);                       // the gallery's outer wall, with a doorway toward the wing
+      wl(55, 78, 54.4, 54.8); wl(82, 100, 54.4, 54.8);                        // the lane's north wall, with a gap at the wing's back door
+      wl(47.4, 73.7, 60.2, 60.6); wl(73.7, 100, 60.2, 60.6);                  // the lane's south wall
+      wl(47.2, 47.6, 47.2, 60.4);                                             // closes the lane's west end, so it turns north into the gallery
+      addBox(51.1, 3.2, 44.4, 7.6, 0.3, 20.8, M.slab, { tag: 'slab', destructible: true }); // gallery roof
+      addBox(78, 3.2, 57.5, 22, 0.3, 6.2, M.slab, { tag: 'slab', destructible: true });      // lane roof
+      for (const z of [38, 44, 50]) addBox(53.4, 0, z, 0.6, 3.2, 0.6, M.concreteDark, { tag: 'pillar', destructible: true }); // a row of columns down the gallery
+      block(92, 58.8); block(66, 56.2);
     }
-    for (const [x, z, r] of [[62, -52, 0], [80, -56, 1], [100, -58, 2], [64, 62, 3], [84, 66, 0], [100, 76, 1], [58, -12, 2]]) cluster(x, z, r);
+    for (const [x, z, r] of [[62, -52, 0], [80, -56, 1], [100, -58, 2], [100, 76, 1], [58, -12, 2]]) cluster(x, z, r);
 
     // ---- SOUTH: the Depot ------------------------------------------------------------------------------------
-    outpost(36, 72, 14, 12, 2, 'depot', M.cream, 'endZ');
+    plateau(36, 72, 28, 26, 1.5, ['n', 'w']); outpost(36, 72, 14, 12, 2, 'depot', M.cream, 'endZ', 1.5); // the supply dump is on a raised loading apron
     outpost(-76, 62, 12, 10, 1, 'infirmary', M.cream);
     terrace(-36, 76, 30, 16, 2.4); // the overlook: see the south gate and the supply dump before you commit
     slab(-27, 57, false, 14, 2.6); slab(-45, 54, false, 8, 2.6); // screens between the terrace and the breach
-    cont(52, 60, false, M.cream); cont(56, 60, false, M.rust, M.cream); cont(20, 58, true, M.navy); cont(60, 84, true, M.cream, M.teal);
+    cont(54.5, 62, false, M.cream); cont(58.5, 62, false, M.rust, M.cream); cont(12, 58, true, M.navy); cont(60, 84, true, M.cream, M.teal);
     for (let i = 0; i < 4; i++) barrier(14 + i * 6, 92, i % 2 === 0); // a vehicle park
     checkpoint(0, 76, false);
     for (const [x, z, r] of [[86, 62, 2], [-58, 84, 0], [-60, 50, 1], [-12, 96, 2], [-8, 84, 3]]) cluster(x, z, r);
@@ -473,7 +515,7 @@ export function createWorld(scene, renderer) {
     // ---- WEST: the Works -------------------------------------------------------------------------------------
     tower(-78, -27, 22, 18, 4);
     warehouse(-80, 28, 26, 18);
-    outpost(-92, 92, 12, 10, 2, 'armoury', M.amber);
+    plateau(-92, 92, 24, 22, 1.5, ['n', 'e']); outpost(-92, 92, 12, 10, 2, 'armoury', M.amber, 'corner', 1.5); // the armoury sits up on a plinth
     checkpoint(-76, 0, true);
     { // the quiet way: a walled lane from the west edge, past the foot of the tower, to the breach
       for (const z of [-44.9, -39.1]) for (const [x0, x1] of [[-100, -76], [-76, -52]]) addBox((x0 + x1) / 2, 0, z, x1 - x0, 3.2, 0.4, M.concrete, { tag: 'wall', destructible: true });

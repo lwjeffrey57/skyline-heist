@@ -243,7 +243,7 @@ export function init(ctx) {
     for (const b of world.buildings) {
       const ix = b.w / 2 - 1.6, iz = b.d / 2 - 1.6;
       for (let f = 0; f < b.floors; f++) {
-        const y = f * b.floorHeight, kind = f === 0 ? 'standard' : 'secure';
+        const y = (b.baseY || 0) + f * b.floorHeight, kind = f === 0 ? 'standard' : 'secure';
         const inKeep = (px, pz) => b.keep && b.keep.some(([a0, a1, c0, c1]) => px > a0 && px < a1 && pz > c0 && pz < c1); // not on a stair core or over an open well
         for (const [sx, sz] of [[-1, -1], [1, 1], [-1, 1], [1, -1]]) if (Math.random() < (f === 0 ? 0.28 : 0.32) && !inKeep(b.x + sx * ix, b.z + sz * iz)) spots.push([kind, b.x + sx * ix, y, b.z + sz * iz]);
       }
@@ -260,7 +260,7 @@ export function init(ctx) {
     const armoury = outpost('armoury'), sites = armoury ? [[armoury, 1], [armoury, -1]] : [];
     for (const b of world.buildings.filter((b) => !b.outpost).sort(() => Math.random() - 0.5).slice(0, armoury ? 3 : 5)) sites.push([b, 1]);
     sites.forEach(([b, side], i) => {
-      const y = (b.floors - 1) * b.floorHeight, x = b.x + side * (b.w / 2 - 1.6) * 0.55, z = b.z + b.d / 2 - 0.75;
+      const y = (b.baseY || 0) + (b.floors - 1) * b.floorHeight, x = b.x + side * (b.w / 2 - 1.6) * 0.55, z = b.z + b.d / 2 - 0.75;
       if (!player.free(x, y + 0.1, z, 1.8)) return;
       const items = [{ weapon: found[i] }, { supply: 'ammoFull', name: 'Ammo' }];
       if (Math.random() < 0.5) items.push({ supply: 'armor', name: 'Armour plate' });
@@ -268,7 +268,7 @@ export function init(ctx) {
     });
     // the other outposts: what each one is for
     const MED = { supply: 'medkit', name: 'Medkit' }, PLATE = { supply: 'armor', name: 'Armour plate' }, AMMO = { supply: 'ammo', name: 'Ammo box' };
-    const put = (kind, b, dx, items) => { const x = b.x + dx, z = b.z - b.d / 2 + 1.5; if (!player.free(x, 0.75, z, 0.5)) return; const L = addLootable(kind, x, floorBelow(x, 0.4, z), z, 0); if (items) L.items = items; };
+    const put = (kind, b, dx, items) => { const x = b.x + dx, z = b.z - b.d / 2 + 1.5, gy = b.baseY || 0; if (!player.free(x, gy + 0.75, z, 0.5)) return; const L = addLootable(kind, x, floorBelow(x, gy + 0.4, z), z, 0); if (items) L.items = items; };
     const inf = outpost('infirmary'), dep = outpost('depot'), sig = outpost('signal');
     if (inf) { put('standard', inf, -2.2, [MED, MED, PLATE]); put('standard', inf, 2.2, [MED, PLATE, AMMO]); }
     if (dep) { put('secure', dep, -2.2, [{ supply: 'bag', size: Math.random() < 0.3 ? 8 : 4, name: 'Backpack' }, AMMO, AMMO]); put('standard', dep, 2.2, [AMMO, MED, rollItem(1.5)]); }

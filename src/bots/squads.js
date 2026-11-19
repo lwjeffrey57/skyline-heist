@@ -48,8 +48,9 @@ export function createSquads(mgr, hooks) {
       const q = squad('post', name), l = Math.hypot(b.x, b.z) || 1; let ox = b.x / l, oz = b.z / l; // outward
       if (Math.abs(ox) > Math.abs(oz)) { ox = Math.sign(ox); oz = 0; } else { oz = Math.sign(oz); ox = 0; }
       const ext = (ox ? b.w : b.d) / 2 + 2.4, lat = 2.2;
-      slot(q, b.x + ox * ext - oz * lat, 0, b.z + oz * ext + ox * lat, Math.atan2(ox, oz));
-      slot(q, b.x - ox * ext + oz * lat, 0, b.z - oz * ext - ox * lat, Math.atan2(-ox, -oz));
+      const gy = b.baseY || 0; // a building on raised ground is guarded up there, at its doors
+      slot(q, b.x + ox * ext - oz * lat, gy, b.z + oz * ext + ox * lat, Math.atan2(ox, oz));
+      slot(q, b.x - ox * ext + oz * lat, gy, b.z - oz * ext - ox * lat, Math.atan2(-ox, -oz));
       q.b = b; return q;
     };
     const outs = world.buildings.filter((b) => b.outpost), rank = { armoury: 0, watch: 1 };
