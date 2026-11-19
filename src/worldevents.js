@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // ctx.worldEvents = { marks } — marks are { x, z, title, css, active } and are drawn by the compass and the map.
 
 const DROP = { times: [[110, 170], [380, 450]], fall: 14, height: 90, minDist: 45, maxDist: 110 };
-const HVT = { at: 45, hpMul: 1.6, markEvery: 8 };
+const HVT = { at: 45, hpMul: 3.5, markEvery: 8 }; // a mini-boss: three and a half times the health of whoever was picked
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export function init(ctx) {
@@ -20,6 +20,17 @@ export function init(ctx) {
   const crateMat = new THREE.MeshStandardMaterial({ color: 0x3b4a3a, roughness: 0.7, metalness: 0.2 });
   const canopyMat = new THREE.MeshStandardMaterial({ color: 0xe8e2cf, roughness: 0.9, side: THREE.DoubleSide });
   const beamMat = new THREE.MeshBasicMaterial({ color: 0xff7a1a, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, fog: false });
+
+  // the mini-boss badge that floats over the commander's head: a crowned purple shield with an ink outline
+  const badge = (() => {
+    const S = 128, cv = document.createElement('canvas'); cv.width = cv.height = S; const g = cv.getContext('2d');
+    const shield = (k, fill) => { g.beginPath(); g.moveTo(64, 64 - 54 * k); g.lineTo(64 + 46 * k, 64 - 34 * k); g.lineTo(64 + 40 * k, 64 + 18 * k); g.lineTo(64, 64 + 56 * k); g.lineTo(64 - 40 * k, 64 + 18 * k); g.lineTo(64 - 46 * k, 64 - 34 * k); g.closePath(); g.fillStyle = fill; g.fill(); };
+    shield(1, '#0a0a0e'); shield(0.86, '#d48bff'); shield(0.7, '#6b2fa8');
+    g.fillStyle = '#ffe14a'; g.strokeStyle = '#0a0a0e'; g.lineWidth = 4; g.lineJoin = 'round';
+    g.beginPath(); g.moveTo(38, 78); g.lineTo(34, 44); g.lineTo(50, 58); g.lineTo(64, 36); g.lineTo(78, 58); g.lineTo(94, 44); g.lineTo(90, 78); g.closePath(); g.fill(); g.stroke();
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, alphaTest: 0.5, fog: false, toneMapped: false })); sp.visible = false; scene.add(sp); return sp;
+  })();
 
   const say = (html, color) => { if (ctx.raid && ctx.raid.toast) ctx.raid.toast(html, color); };
   const chime = (...a) => { if (ctx.raid && ctx.raid.chime) ctx.raid.chime(...a); };
@@ -73,9 +84,9 @@ export function init(ctx) {
     hvt = pool[0]; hvt.hvt = true; hvt.maxHp = Math.round(hvt.maxHp * HVT.hpMul); hvt.hp = hvt.maxHp; hvt.name = 'Site commander';
     hvtMark = { x: hvt.pos.x, z: hvt.pos.z, title: 'COMMANDER', css: '#d48bff', active: true };
     marks.push(hvtMark); hvtT = HVT.markEvery;
-    say('The site commander is here, carrying a vault keycard. Last known position is on your compass.', '#d48bff'); chime([440, 554, 659], 0.1, 0.3, 0.18, 'triangle');
+    say('The site commander is here, carrying a vault keycard. Heavily armoured — look for the crowned badge. Last known position is on your compass.', '#d48bff'); chime([440, 554, 659], 0.1, 0.3, 0.18, 'triangle');
   }
-  function clearHvt() { if (hvt) hvt.hvt = false; hvt = null; if (hvtMark) { const i = marks.indexOf(hvtMark); if (i >= 0) marks.splice(i, 1); hvtMark = null; } }
+  function clearHvt() { badge.visible = false; if (hvt) hvt.hvt = false; hvt = null; if (hvtMark) { const i = marks.indexOf(hvtMark); if (i >= 0) marks.splice(i, 1); hvtMark = null; } }
 
   events.on('raidStart', () => {
     active = true; elapsed = 0; for (const d of drops) endDrop(d); drops = []; clearHvt(); marks.length = 0;
@@ -101,7 +112,11 @@ export function init(ctx) {
       if (hvtDue && elapsed >= hvtDue) { hvtDue = 0; pickHvt(); }
       if (hvt) {
         if (!hvt.alive || !hvt.hvt) clearHvt();
-        else { hvtT -= dt; if (hvtT <= 0) { hvtT = HVT.markEvery; hvtMark.x = hvt.pos.x; hvtMark.z = hvt.pos.z; } } // a position report every few seconds, not a live tracker
+        else { // the badge rides above the head and holds its size on screen out to a distance, so you can pick them out
+          const d = Math.hypot(hvt.pos.x - player.pos.x, hvt.pos.z - player.pos.z), k = Math.max(1.15, Math.min(3.4, d / 9));
+          badge.visible = true; badge.position.set(hvt.pos.x, hvt.pos.y + (hvt.height || 1.9) + 0.5 + k * 0.25 + Math.sin(elapsed * 3) * 0.05, hvt.pos.z); badge.scale.set(k, k, 1);
+          hvtT -= dt; if (hvtT <= 0) { hvtT = HVT.markEvery; hvtMark.x = hvt.pos.x; hvtMark.z = hvt.pos.z; } // a position report every few seconds, not a live tracker
+        }
       }
       for (let i = drops.length - 1; i >= 0; i--) {
         const d = drops[i];
