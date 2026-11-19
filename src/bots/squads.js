@@ -70,7 +70,8 @@ export function createSquads(mgr, hooks) {
     };
     const gates = [[0, -IW], [0, IW], [-IW, 0], [IW, 0], [38, -IW], [-38, IW]];
     const gateSquads = gates.map(([x, z], i) => gate(x, z, 'gate' + i));
-    const towers = world.buildings.filter((b) => b.tower).map((b, i) => bldg(b, 'tower' + i));
+    const towers = world.buildings.filter((b) => b.tower && !b.hq).map((b, i) => bldg(b, 'tower' + i));
+    const hqB = world.buildings.find((b) => b.hq); if (hqB) posts.push(bldg(hqB, 'hq')); // the headquarters is always held
     posts.push(outSquads[0], outSquads[1], gateSquads[0], outSquads[2], gateSquads[1], outSquads[3], outSquads[4], gateSquads[2], gateSquads[3], towers[0], towers[1], gateSquads[4], gateSquads[5], towers[2], towers[3]);
     // patrol routes
     const inner = [], outer = [];

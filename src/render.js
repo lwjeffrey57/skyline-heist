@@ -167,10 +167,15 @@ export function createView() {
     if (e.code !== 'F8' || e.repeat) return;
     e.preventDefault(); style.enabled = !style.enabled;
     try { localStorage.setItem('sh-style', style.enabled ? 'ink' : 'real'); } catch { /* storage unavailable */ }
+    view.setQuality(view.quality); syncAA();
     hud.textContent = `art style: ${style.enabled ? 'ink' : 'realistic'}`; hud.style.opacity = 0.85; clearTimeout(hudTimer); hudTimer = setTimeout(() => { hud.style.opacity = 0; }, 1400);
   });
   view.style = style;
   const want = new URLSearchParams(location.search).get('q');
+  // ink lines must not follow the sub-pixel camera shake that temporal anti-aliasing uses, or they wobble:
+  // with the ink style on, the steadier edge anti-aliasing is used instead
+  function syncAA() { if (style.enabled && taa.enabled) { taa.enabled = false; smaa.enabled = true; rig.temporal = scenePost.temporal = false; } }
+  const setQ = view.setQuality; view.setQuality = (n, a) => { setQ(n, a); syncAA(); };
   view.setQuality(QUALITY[want] ? want : 'high');
   return view;
 }

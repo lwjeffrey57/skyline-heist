@@ -349,10 +349,113 @@ export function createWorld(scene, renderer) {
         towerZips.push([new THREE.Vector3(x + dx * (W2 / 2 - 3), b.roofY + 3.4, z + dz * (D2 / 2 - 2.5)), new THREE.Vector3(ex, 5.6, ez), b.roofY]); break;
       }
     };
-    for (const [ox, oz] of order.slice(5, 7)) tower(ox + jit(2), oz + jit(2), 22, 18, rand() < 0.4 ? 5 : 4); // two tall blocks on leftover outpost lots
+
+    // ---- larger building types ------------------------------------------------
+    // a straight flight of U-turn stairs for floor f, centred on (cx, cz); returns the hole it needs in the slab above
+    const stairFlight = (cx, cz, f) => {
+      const y0 = f * FH, hx0 = cx - 2.7, hx1 = cx + 2.7, lane = f % 2, lz0 = lane === 0 ? cz - 1.7 : cz + 0.1, lz1 = lz0 + 1.6;
+      const steps = 15, rise = FH / steps, run = (hx1 - hx0) / steps;
+      for (let st = 0; st < steps; st++) addBox(lane === 0 ? hx0 + run * (st + 0.5) : hx1 - run * (st + 0.5), y0, (lz0 + lz1) / 2, run, rise * (st + 1), lz1 - lz0, M.concreteDark, B('stair'));
+      return [hx0, hx1, lz0, lz1];
+    };
+    // a floor slab over [ax0..ax1] x [az0..az1] at height sy with rectangular holes cut out of it
+    const slabWithHoles = (ax0, ax1, az0, az1, sy, holes) => {
+      const xs = [ax0, ax1], zs = [az0, az1];
+      for (const [hx0, hx1, hz0, hz1] of holes) { xs.push(Math.max(ax0, Math.min(ax1, hx0)), Math.max(ax0, Math.min(ax1, hx1))); zs.push(Math.max(az0, Math.min(az1, hz0)), Math.max(az0, Math.min(az1, hz1))); }
+      xs.sort((a, b) => a - b); zs.sort((a, b) => a - b);
+      const inHole = (x, z) => holes.some(([hx0, hx1, hz0, hz1]) => x > hx0 && x < hx1 && z > hz0 && z < hz1);
+      for (let j = 0; j < zs.length - 1; j++) {
+        if (zs[j + 1] - zs[j] < 0.01) continue;
+        let start = null; // merge neighbouring cells along x into one piece
+        for (let i = 0; i <= xs.length - 1; i++) {
+          const open = i < xs.length - 1 && xs[i + 1] - xs[i] >= 0.01 && !inHole((xs[i] + xs[i + 1]) / 2, (zs[j] + zs[j + 1]) / 2);
+          if (open && start === null) start = xs[i];
+          if (!open && start !== null && (i === xs.length - 1 || xs[i + 1] - xs[i] >= 0.01)) { addBox((start + xs[i]) / 2, sy, (zs[j] + zs[j + 1]) / 2, xs[i] - start, SLAB, zs[j + 1] - zs[j], M.slab, B('slab')); start = null; }
+        }
+      }
+    };
+    const finishLarge = (x, z, W2, D2, floors, first, accent, extra, levels = floors) => {
+      const ry = levels * FH, x0 = x - W2 / 2, x1 = x + W2 / 2, z0 = z - D2 / 2, z1 = z + D2 / 2;
+      const front = addBox(x, ry, z0 + T / 2, W2, 1.0, T, M.concrete, B('parapet'));
+      addBox(x, ry, z1 - T / 2, W2, 1.0, T, M.concrete, B('parapet'));
+      addBox(x0 + T / 2, ry, z, T, 1.0, D2 - T * 2, M.concrete, B('parapet'));
+      addBox(x1 - T / 2, ry, z, T, 1.0, D2 - T * 2, M.concrete, B('parapet'));
+      addBox(x, ry + 1.0, z0 + T / 2, W2, 0.06, T + 0.04, M.glowAmber, { solid: false, shadow: false, attachTo: front });
+      const b = { x, z, w: W2, d: D2, floors, floorHeight: FH, wallThickness: T, roofY: ry, accent, tower: true, ...extra };
+      buildings.push(b);
+      lod.push({ x, z, far: false, meshes: colliders.slice(first).filter((c) => c.tag === 'stair' || c.tag === 'inner' || (c.tag === 'slab' && c.max.y < ry - 0.1)).map((c) => c.mesh) });
+      return b;
+    };
+    // headquarters: a full-scale building. Open ground-floor hall on columns, an atrium through the middle, two stair
+    // cores in opposite corners, and on the upper floors rooms along the long sides with galleries round the atrium.
+    const headquarters = (x, z, W2, D2, floors) => {
+      const first = colliders.length, accent = pick(ACCENTS);
+      const x0 = x - W2 / 2, x1 = x + W2 / 2, z0 = z - D2 / 2, z1 = z + D2 / 2, RD = 7;
+      const aw = W2 - 20, ad = D2 - 2 * (RD + 6), atrium = [x - aw / 2, x + aw / 2, z - ad / 2, z + ad / 2];
+      const cores = [[x0 + 4.5, z0 + 3.6], [x1 - 4.5, z1 - 3.6]];
+      const inner = (cx, y, cz, w, h, d, mat = M.concrete) => addBox(cx, y, cz, w, h, d, mat, { tag: 'inner', destructible: true });
+      for (let f = 0; f < floors; f++) {
+        const y0 = f * FH;
+        wallRun(true, z0 + T / 2, x0, x1, y0, f === 0, accent); wallRun(true, z1 - T / 2, x0, x1, y0, f === 0, accent);
+        wallRun(false, x0 + T / 2, z0 + T, z1 - T, y0, f === 0, accent); wallRun(false, x1 - T / 2, z0 + T, z1 - T, y0, f === 0, accent);
+        const holes = cores.map(([cx, cz]) => stairFlight(cx, cz, f));
+        if (f < floors - 1) holes.push(atrium); // the atrium is open up to the top floor's ceiling
+        slabWithHoles(x0 + T, x1 - T, z0 + T, z1 - T, y0 + FH - SLAB, holes);
+        if (f === 0) { // the hall: rows of columns to fight between
+          for (let cx = x0 + 8; cx <= x1 - 8; cx += 7.5) for (const cz of [z0 + RD + 1, z1 - RD - 1]) inner(cx, 0, cz, 0.7, FH - SLAB, 0.7, M.concreteDark);
+          for (const sx of [-1, 1]) inner(x + sx * (aw / 2 - 1), 0, z, 0.5, 1.15, Math.min(ad, 6)); // low walls across the middle
+        } else {
+          // rooms along both long sides: dividers, and a corridor wall with a doorway into each room
+          const n = Math.max(3, Math.round(W2 / 9)), rw = (W2 - 2 * T) / n;
+          for (const [zw, zmid, dep] of [[z0 + RD, (z0 + T + z0 + RD) / 2, RD - T], [z1 - RD, (z1 - T + z1 - RD) / 2, RD - T]]) {
+            for (let i = 1; i < n; i++) inner(x0 + T + rw * i, y0, zmid, 0.25, FH - SLAB, dep);
+            for (let i = 0; i < n; i++) { const c = x0 + T + rw * (i + 0.5), seg = (rw - 1.7) / 2; for (const sd of [-1, 1]) inner(c + sd * (0.85 + seg / 2), y0, zw, seg, FH - SLAB, 0.25, i % 2 ? accent : M.concrete); }
+          }
+          // a waist-high wall round the atrium: cover for fights across the gap
+          const [a0, a1, b0, b1] = atrium;
+          inner(x, y0, b0 - 0.1, aw + 0.4, 1.05, 0.2, M.concreteDark); inner(x, y0, b1 + 0.1, aw + 0.4, 1.05, 0.2, M.concreteDark);
+          inner(a0 - 0.1, y0, z, 0.2, 1.05, ad, M.concreteDark); inner(a1 + 0.1, y0, z, 0.2, 1.05, ad, M.concreteDark);
+        }
+      }
+      const keep = cores.map(([cx, cz]) => [cx - 4.4, cx + 4.4, cz - 3.3, cz + 3.3]).concat([[atrium[0] - 1.2, atrium[1] + 1.2, atrium[2] - 1.2, atrium[3] + 1.2]]);
+      return finishLarge(x, z, W2, D2, floors, first, accent, { hq: true, keep });
+    };
+    // warehouse: one double-height hall with columns, big doors, and a mezzanine round two sides reached by one stair
+    const warehouse = (x, z, W2, D2) => {
+      const first = colliders.length, accent = pick(ACCENTS);
+      const x0 = x - W2 / 2, x1 = x + W2 / 2, z0 = z - D2 / 2, z1 = z + D2 / 2;
+      for (let f = 0; f < 2; f++) {
+        const y0 = f * FH;
+        wallRun(true, z0 + T / 2, x0, x1, y0, f === 0, accent); wallRun(true, z1 - T / 2, x0, x1, y0, f === 0, accent);
+        wallRun(false, x0 + T / 2, z0 + T, z1 - T, y0, f === 0, accent); wallRun(false, x1 - T / 2, z0 + T, z1 - T, y0, f === 0, accent);
+      }
+      const core = [x0 + 4.5, z0 + 3.6];
+      const h0 = stairFlight(core[0], core[1], 0), h1 = stairFlight(core[0], core[1], 1);
+      // mezzanine: a 4.5 m gallery along the north and west walls; the rest of the hall is open to the roof
+      const MZ = 4.5;
+      slabWithHoles(x0 + T, x1 - T, z0 + T, z1 - T, FH - SLAB, [h0, [x0 + T + MZ, x1, z0 + T + MZ, z1]]);
+      addBox(x + MZ / 2, FH, z0 + T + MZ + 0.1, W2 - MZ - 2 * T, 1.05, 0.2, M.concreteDark, { tag: 'inner', destructible: true });
+      addBox(x0 + T + MZ + 0.1, FH, z + MZ / 2, 0.2, 1.05, D2 - MZ - 2 * T, M.concreteDark, { tag: 'inner', destructible: true });
+      slabWithHoles(x0 + T, x1 - T, z0 + T, z1 - T, 2 * FH - SLAB, [h1]);
+      for (let cx = x0 + MZ + 5; cx <= x1 - 5; cx += 7) for (const cz of [z - D2 / 6 + MZ / 2, z + D2 / 4 + MZ / 4]) addBox(cx, 0, cz, 0.6, 2 * FH - SLAB, 0.6, M.concreteDark, { tag: 'inner', destructible: true });
+      return finishLarge(x, z, W2, D2, 1, first, accent, { warehouse: true, keep: [[core[0] - 4.4, core[0] + 4.4, core[1] - 3.3, core[1] + 3.3]] }, 2); // one furnished floor, two storeys tall
+    };
+
+    // the three lots the outposts did not take: one gets the headquarters, the others a tall block each
+    {
+      const spare = order.slice(5, 8), spur = ([lx, lz]) => (lx === 45 && lz === -105) || (lx === -45 && lz === 105); // a road runs through these two
+      const hqLot = spare.find((l) => !spur(l)) || spare[0];
+      for (const lot of spare) {
+        const [ox, oz] = lot;
+        if (lot !== hqLot) { tower(ox + jit(2), oz + jit(2), rand() < 0.5 ? 22 : 18, rand() < 0.5 ? 18 : 16, 3 + Math.floor(rand() * 3)); continue; }
+        // long side runs along the ring, centre pulled in so it clears the ring road and the inner wall
+        const alongZ = Math.abs(ox) > Math.abs(oz), cx = alongZ ? Math.sign(ox) * 100 : ox, cz = alongZ ? oz : Math.sign(oz) * 100;
+        headquarters(cx, cz, alongZ ? 34 : 46, alongZ ? 46 : 34, rand() < 0.5 ? 4 : 3);
+      }
+    }
     // and two long, lower halls in the corners of the site
     const corners = [[110, 110], [-110, 110], [110, -110], [-110, -110]].map((c) => [rand(), c]).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
-    for (const [cx, cz] of corners.slice(0, 2)) tower(cx + jit(2), cz + jit(2), 28, 18, rand() < 0.5 ? 3 : 4);
+    corners.slice(0, 3).forEach(([cx, cz], i) => { if (i === 1) tower(cx + jit(2), cz + jit(2), 28, 18, rand() < 0.5 ? 3 : 4); else warehouse(cx + jit(2), cz + jit(2), i ? 26 : 32, i ? 18 : 22); });
     // scattered barriers, slabs and containers all the way round
     for (let i = 0; i < 260; i++) {
       const side = Math.floor(rand() * 4), along = (rand() * 2 - 1) * (ARENA - 6), depth = CORE + 4 + rand() * (ARENA - CORE - 12);

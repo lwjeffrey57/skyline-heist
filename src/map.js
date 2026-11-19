@@ -49,7 +49,7 @@ export function init(ctx) {
       g.fillStyle = 'rgba(255,255,255,.75)'; g.fillText(`${b.floors}F`, X(b.x), Z(b.z));
       const tc = b.threat && world.threatColors ? world.threatColors[b.threat] : null;
       if (tc) { g.fillStyle = tc; g.fillText(b.threat.toUpperCase(), X(b.x), Z(b.z + b.d / 2) + 20); g.strokeStyle = tc; g.lineWidth = 2; g.strokeRect(X(b.x - b.w / 2), Z(b.z - b.d / 2), b.w * K, b.d * K); g.lineWidth = 1; }
-      if (b.tower) { g.fillStyle = '#ffc56b'; g.fillText(b.w > 24 ? 'HALL' : 'TOWER', X(b.x), Z(b.z + b.d / 2) + 9); }
+      if (b.tower) { g.fillStyle = '#ffc56b'; g.fillText(b.hq ? 'HEADQUARTERS' : b.warehouse ? 'WAREHOUSE' : b.w > 24 ? 'HALL' : 'TOWER', X(b.x), Z(b.z + b.d / 2) + 9); }
       if (b.outpost) { g.fillStyle = '#7fd6ff'; g.fillText(b.outpost === 'depot' ? 'SUPPLY DUMP' : b.outpost.toUpperCase(), X(b.x), Z(b.z + b.d / 2) + 9); }
     }
     // perimeter

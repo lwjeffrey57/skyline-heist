@@ -507,11 +507,12 @@ export function createDressing(ctx, { lamps, ground, sign }) {
     const r = rng(seed + bi * 7919 + 13), k = new Kit(secCyl[secOf(b.x, b.z)]);
     const x0 = b.x - b.w / 2, x1 = b.x + b.w / 2, z0 = b.z - b.d / 2, z1 = b.z + b.d / 2;
     const ix0 = x0 + T, ix1 = x1 - T, iz0 = z0 + T, iz1 = z1 - T;
-    const px = b.tower ? Math.round(b.w / 3.2) : 0;
+    const px = b.tower && !b.keep ? Math.round(b.w / 3.2) : 0;
     for (let f = 0; f < b.floors; f++) {
       const y = f * FH, theme = THEMES[themeFor(b, f, shed, r)];
       const keep = [], furn = [], lanes = [];
-      keep.push([b.x - 4.4, b.x + 4.4, b.z - 3.3, b.z + 3.3]); // stair core, its landings and the walk round it
+      if (b.keep) keep.push(...b.keep); // large buildings say where their stair cores and open wells are
+      else keep.push([b.x - 4.4, b.x + 4.4, b.z - 3.3, b.z + 3.3]); // stair core, its landings and the walk round it
       if (f === 0) { // doorways: the middle bay of every wall
         const n = Math.max(1, Math.round(b.w / 4)), mw = b.w / n, c = x0 + mw * (Math.floor(n / 2) + 0.5), hw = mw / 2 - 0.5 + 0.5;
         keep.push([c - hw, c + hw, z0, iz0 + 2.3], [c - hw, c + hw, iz1 - 2.3, z1]);

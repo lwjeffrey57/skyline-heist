@@ -10,8 +10,8 @@ const TIERS = [
   { at: 62, name: 'Lockdown', color: '#ff5a4a', bots: 3, respawn: 11, aggr: 0.75, bonus: 0.4, note: 'The site is filling with guards' },
   { at: 84, name: 'Kill order', color: '#ff2d55', bots: 4, respawn: 9, aggr: 1, bonus: 0.6, note: 'Everything on site is coming for you' },
 ];
-// Heat comes from kills only: each enemy you kill adds KILL, so the tiers arrive at 4, 8, 13 and 17 kills.
-const KILL = 5;
+// Heat comes from kills only: each enemy you kill adds KILL, so the tiers arrive at 8, 16, 25 and 34 kills.
+const KILL = 2.5;
 
 export function init(ctx) {
   const { player, events } = ctx;

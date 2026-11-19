@@ -36,17 +36,18 @@ const GUNS = [['rifle', 'Digit2', '2', 900], ['shotgun', 'Digit3', '3', 700], ['
 // Contracts: two are offered each raid; a completed one pays its bonus only if you extract.
 // count contracts tick up from events; check contracts are judged from the raid's state (live, and at extraction).
 const CONTRACTS = [
-  { id: 'lockers', text: 'Open 2 arms lockers', goal: 2, pay: 300, ev: 'loot', inc: (e) => (e.kind === 'locker' ? 1 : 0) },
-  { id: 'search', text: 'Search 8 containers', goal: 8, pay: 250, ev: 'loot', inc: () => 1 },
-  { id: 'vault', text: 'Crack a vault case', goal: 1, pay: 400, ev: 'loot', inc: (e) => (e.kind === 'vault' ? 1 : 0) },
-  { id: 'kills', text: 'Eliminate 3 guards', goal: 3, pay: 300, ev: 'kill', inc: () => 1 },
-  { id: 'heads', text: 'Get 2 headshot kills', goal: 2, pay: 350, ev: 'kill', inc: (e) => (e.headshot ? 1 : 0) },
-  { id: 'sidearm', text: 'Get 2 kills with the pistol', goal: 2, pay: 300, ev: 'kill', inc: (e) => (e.weapon === 'pistol' ? 1 : 0) },
-  { id: 'haul', text: 'Extract with a pack worth 500 cr', pay: 300, check: (s) => s.value >= 500 },
-  { id: 'rare', text: 'Extract with a rare item or better', pay: 300, check: (s) => s.pack.some((i) => i.tier === 'rare' || i.tier === 'epic') },
+  { id: 'lockers', text: 'Open 3 arms lockers', goal: 3, pay: 450, ev: 'loot', inc: (e) => (e.kind === 'locker' ? 1 : 0) },
+  { id: 'search', text: 'Search 16 containers', goal: 16, pay: 400, ev: 'loot', inc: () => 1 },
+  { id: 'vault', text: 'Crack 2 vault cases', goal: 2, pay: 600, ev: 'loot', inc: (e) => (e.kind === 'vault' ? 1 : 0) },
+  { id: 'kills', text: 'Eliminate 12 enemies', goal: 12, pay: 500, ev: 'kill', inc: () => 1 },
+  { id: 'heads', text: 'Get 6 headshot kills', goal: 6, pay: 550, ev: 'kill', inc: (e) => (e.headshot ? 1 : 0) },
+  { id: 'sidearm', text: 'Get 7 kills with the pistol', goal: 7, pay: 500, ev: 'kill', inc: (e) => (e.weapon === 'pistol' ? 1 : 0) },
+  { id: 'haul', text: 'Extract with a pack worth 1800 cr', pay: 500, check: (s) => s.value >= 1800 },
+  { id: 'rare', text: 'Extract with 3 rare items or better', pay: 500, check: (s) => s.pack.filter((i) => i.tier === 'rare' || i.tier === 'epic').length >= 3 },
   { id: 'ghost', text: 'Extract without ever being detected', pay: 500, check: (s) => !s.detected },
-  { id: 'fast', text: 'Extract within 4 minutes', pay: 300, check: (s) => s.elapsed <= 240 },
-  { id: 'district', text: 'Search 3 containers in one district', goal: 3, pay: 300, ev: 'loot', inc: () => 0 }, // given a district when rolled
+  { id: 'raiders', text: 'Kill 3 rival raiders', goal: 3, pay: 600, ev: 'kill', inc: (e) => (e.raider ? 1 : 0) },
+  { id: 'commander', text: 'Kill the site commander', goal: 1, pay: 600, ev: 'kill', inc: (e) => (e.commander ? 1 : 0) },
+  { id: 'district', text: 'Search 7 containers in one district', goal: 7, pay: 300, ev: 'loot', inc: () => 0 }, // given a district when rolled
 ];
 // Districts: the arena is five named areas, each with its own kind of loot.
 const DISTRICTS = {
@@ -327,7 +328,7 @@ export function init(ctx) {
     events.emit('lootTaken', { kind: L.kind, district: L.district });
   }
 
-  for (const b of world.buildings) b.threat = b.outpost ? OUTPOST_THREAT[b.outpost] : b.tower ? (b.floors >= 5 ? 'critical' : b.floors >= 4 ? 'high' : 'medium') : null;
+  for (const b of world.buildings) b.threat = b.outpost ? OUTPOST_THREAT[b.outpost] : b.hq ? 'critical' : b.warehouse ? 'medium' : b.tower ? (b.floors >= 5 ? 'critical' : b.floors >= 4 ? 'high' : 'medium') : null;
   if (world.strongroom) world.strongroom.threat = 'critical';
   world.threatColors = Object.fromEntries(Object.entries(THREAT).map(([k, v]) => [k, v.color]));
 
@@ -337,7 +338,7 @@ export function init(ctx) {
     contracts = pool.slice(0, 2).map((def) => {
       if (def.id === 'district') { // point this one at a district picked for the raid
         const names = Object.keys(DISTRICTS).filter((n) => n !== 'Plaza'), name = names[Math.floor(Math.random() * names.length)];
-        def = { ...def, text: `Search 3 containers in ${name === 'Freight Row' ? name : `the ${name}`}`, inc: (e) => (e.district === name ? 1 : 0) };
+        def = { ...def, text: `Search 7 containers in ${name === 'Freight Row' ? name : `the ${name}`}`, inc: (e) => (e.district === name ? 1 : 0) };
       }
       return { def, n: 0, done: false };
     });
@@ -353,7 +354,7 @@ export function init(ctx) {
     }
   }
   events.on('lootTaken', (e) => contractTick('loot', e));
-  events.on('botDied', (e) => { if (e.by === player) contractTick('kill', { headshot: !!e.headshot, weapon: ctx.weapons && ctx.weapons.current ? ctx.weapons.current.def.id : '' }); });
+  events.on('botDied', (e) => { if (e.by === player) contractTick('kill', { raider: !!(e.bot && e.bot.kind === 'raider'), commander: !!(e.bot && e.bot.hvt), headshot: !!e.headshot, weapon: ctx.weapons && ctx.weapons.current ? ctx.weapons.current.def.id : '' }); });
   events.on('guardAlert', () => { if (state === 'raid') detected = true; });
   const contractRows = (final) => contracts.map((c) => {
     const ok = final ? c.done : met(c), prog = c.def.goal > 1 ? ` <span style="opacity:.6">${c.n}/${c.def.goal}</span>` : '';
