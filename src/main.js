@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createView } from './render.js';
-import { createWorld } from './world.js';
+import { createWorld as createClassicWorld } from './world.js';
+import { createWorld as createFixedWorld } from './world2.js';
 import { Player } from './player.js';
 import { createEvents, installCombat } from './core.js';
 import * as destruction from './destruction.js';
@@ -29,7 +30,11 @@ import * as raid from './raid.js'; // director.js (free-for-all deathmatch) is k
 const view = createView();
 const { renderer, scene, camera } = view;
 const events = createEvents();
-const world = createWorld(scene, renderer);
+// which map: the fixed, hand-designed site (a blockout for now) or the classic one that re-rolls every raid.
+// A build made with VITE_MAP=2 defaults to the fixed map; ?map=1 or ?map=2 in the address always wins.
+const mapParam = /[?&]map=(\d)/.exec(location.search);
+const useFixed = mapParam ? mapParam[1] === '2' : import.meta.env.VITE_MAP === '2';
+const world = (useFixed ? createFixedWorld : createClassicWorld)(scene, renderer);
 
 const input = { keys: new Set(), pressed: new Set(), down(c) { return this.keys.has(c); } };
 const player = new Player(camera, world, input, events);

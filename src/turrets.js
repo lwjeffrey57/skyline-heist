@@ -62,7 +62,7 @@ export function init(ctx) {
   // candidate posts: just inside each gate of the inner wall, looking out along the approach, and in outpost yards
   function posts() {
     const out = [], IW = (world.coreHalf || 70) + 3;
-    for (const [gx, gz, yaw] of [[0, -IW, Math.PI], [38, -IW, Math.PI], [0, IW, 0], [-38, IW, 0], [-IW, 0, -Math.PI / 2], [IW, 0, Math.PI / 2]]) {
+    for (const [gx, gz, yaw] of (world.gates && world.gates.length ? world.gates : [[0, -IW, Math.PI], [38, -IW, Math.PI], [0, IW, 0], [-38, IW, 0], [-IW, 0, -Math.PI / 2], [IW, 0, Math.PI / 2]])) {
       const side = Math.random() < 0.5 ? -3 : 3, inward = 2.5; // inside the gateway itself, so the wall never blocks its view out
       out.push(gz === 0 ? [gx - Math.sign(gx) * inward, side, yaw] : [gx + side, gz - Math.sign(gz) * inward, yaw]);
     }

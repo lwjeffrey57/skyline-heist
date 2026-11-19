@@ -104,7 +104,7 @@ export function init(ctx) {
   const lamps = []; // { pos, color, intensity, parent (mesh or null) }
   let children = 0;
   // ?nodecor=1 switches the set dressing (visuals/dressing.js) and the distance culls below off, for before / after comparisons
-  const NODECOR = /[?&]nodecor=1/.test(typeof location !== 'undefined' ? location.search : '');
+  const NODECOR = /[?&]nodecor=1/.test(typeof location !== 'undefined' ? location.search : '') || !!ctx.world.blockout; // a blockout map is played bare
   // small detail meshes that hang off level pieces, grouped by where they are so they can be hidden when far away
   const kidGroups = new Map(); // key -> { x, z, range, far, meshes }
   const kid = (m, key, x, z, range) => { let g = kidGroups.get(key); if (!g) kidGroups.set(key, (g = { x, z, range, far: false, meshes: [] })); g.meshes.push(m); return m; };

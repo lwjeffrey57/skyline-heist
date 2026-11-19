@@ -3,3 +3,4 @@ dist
 .vite-cache
 shots
 artifact/source-backup.json
+dist2

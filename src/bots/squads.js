@@ -68,7 +68,7 @@ export function createSquads(mgr, hooks) {
       for (const s of [-1, 1]) slot(q, gx + ox * 2.6 - oz * 2.4 * s, 0, gz + oz * 2.6 + ox * 2.4 * s, yaw + s * 0.25);
       return q;
     };
-    const gates = [[0, -IW], [0, IW], [-IW, 0], [IW, 0], [38, -IW], [-38, IW]];
+    const gates = world.gates && world.gates.length ? world.gates.map(([gx, gz]) => [gx, gz]) : [[0, -IW], [0, IW], [-IW, 0], [IW, 0], [38, -IW], [-38, IW]];
     const gateSquads = gates.map(([x, z], i) => gate(x, z, 'gate' + i));
     const towers = world.buildings.filter((b) => b.tower && !b.hq).map((b, i) => bldg(b, 'tower' + i));
     world.buildings.filter((b) => b.hq).forEach((b, i) => posts.push(bldg(b, 'hq' + i))); // every wing of the campus is always held
