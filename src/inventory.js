@@ -32,6 +32,7 @@ const esc = (s) => String(s).replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&l
 
 export function createInventory(ctx, api) {
   const { stash, save, GUNS, UPGRADES, packSize, contractsHtml, chime, onDeploy } = api;
+  const shopGuns = api.shopGuns || new Set(GUNS.map((g2) => g2[0]));
   const defOf = (id) => { const s = ctx.weapons && ctx.weapons.inventory.find((v) => v.def.id === id); return s ? s.def : null; };
   const gunCost = (id) => (GUNS.find((g) => g[0] === id) || [0, 0, 0, 600])[3];
 
@@ -143,7 +144,7 @@ export function createInventory(ctx, api) {
     normalise();
     const risk = stash.pack.concat(stash.w, stash.b).reduce((a, it) => a + (it ? sellValue(it) : 0), 0);
     const pistol = defOf('pistol');
-    const shop = GUNS.filter(([id]) => defOf(id)).map(([id, , , cost]) => ({ it: { t: 'weapon', id }, cost })).concat(Object.keys(SUPPLY).map((k) => ({ it: { t: k }, cost: SUPPLY[k].cost })), (W() && W().attachments ? W().attachments : []).map((a) => ({ it: { t: 'att', id: a.id }, cost: a.price })), Object.keys(BAGS).map((k) => ({ it: { t: 'bag', size: Number(k) }, cost: BAGS[k].cost })));
+    const shop = GUNS.filter(([id]) => defOf(id) && shopGuns.has(id)).map(([id, , , cost]) => ({ it: { t: 'weapon', id }, cost })).concat(Object.keys(SUPPLY).map((k) => ({ it: { t: k }, cost: SUPPLY[k].cost })), (W() && W().attachments ? W().attachments : []).filter((a) => a.tier === 'common' || a.tier === 'uncommon').map((a) => ({ it: { t: 'att', id: a.id }, cost: a.price })), Object.keys(BAGS).map((k) => ({ it: { t: 'bag', size: Number(k) }, cost: BAGS[k].cost })));
     root.innerHTML = `
       <div>
         <h1>Skyline Heist</h1>
@@ -171,7 +172,7 @@ export function createInventory(ctx, api) {
       </div>
       <div>
         <div class="tabs">${[['shop', 'Shop'], ['traders', 'Traders'], ['base', 'Base'], ['settings', 'Settings']].map(([id, label]) => `<span class="${tab === id ? 'on' : ''}" data-tab="${id}">${label}</span>`).join('')}</div>
-        ${tab === 'shop' ? `<h3 style="margin-top:10px">Click to buy</h3><div class="shop">${shop.map((s, i) => `<div class="slot ${stash.credits < s.cost ? 'short' : ''}" data-buy="${i}">${tile(s.it)}<span class="vl" style="position:absolute;left:3px;bottom:2px;font-size:9px;color:#ffc56b">${s.cost}</span></div>`).join('')}</div>` : ''}
+        ${tab === 'shop' ? `<h3 style="margin-top:10px">Click to buy</h3><p style="margin:0 0 6px;font-size:11px;letter-spacing:1px;opacity:.65">Basics only. The best guns and parts are out there: lockers, the commander, rival crews, supply drops.</p><div class="shop">${shop.map((s, i) => `<div class="slot ${stash.credits < s.cost ? 'short' : ''}" data-buy="${i}">${tile(s.it)}<span class="vl" style="position:absolute;left:3px;bottom:2px;font-size:9px;color:#ffc56b">${s.cost}</span></div>`).join('')}</div>` : ''}
         ${tab === 'traders' ? TRADERS.map((tr) => {
           const st = taskState(stash, tr), t = st.task;
           const reward = t ? [t.reward.cr ? `${t.reward.cr} cr` : ''].concat(t.reward.items.map((it) => esc(nameOf(it)))).filter(Boolean).join(' + ') : '';

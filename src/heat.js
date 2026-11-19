@@ -37,7 +37,7 @@ export function init(ctx) {
   function apply() {
     const T = TIERS[tier - 1], raid = ctx.raid;
     if (ctx.bots && raid) {
-      ctx.bots.config.respawnDelay = T.respawn;
+      ctx.bots.config.respawnDelay = T.respawn * (lullT > 0 ? 2.5 : 1);
       ctx.bots.setCount(raid.config.bots + T.bots);
       if (ctx.bots.setAggression) ctx.bots.setAggression(T.aggr);
     }
@@ -61,12 +61,23 @@ export function init(ctx) {
 
   events.on('raidStart', () => { active = true; value = 0; tier = 1; huntT = 0; alertCd = 0; shown = -1; apply(); });
   events.on('raidEnd', () => { active = false; bar.hidden = true; banner.style.opacity = '0'; });
-  events.on('botDied', (e) => { if (e.by === player) add(KILL); });
+  events.on('botDied', (e) => { if (e.by === player) { add(KILL); press(0.1); } });
+  // The pace: heat sets how dangerous the site is; this watches how hard you are being pressed right now and makes the
+  // raid breathe. After a fight that pushed you to the limit you get a lull (reinforcements held back, no hunting
+  // parties); when nothing has happened for a long while, something is sent your way.
+  let pressure = 0, peak = 0, lullT = 0, quietT = 0;
+  const press = (n) => { if (active) { pressure = Math.min(1, pressure + n); peak = Math.max(peak, pressure); } };
+  events.on('playerDamaged', (e) => press((e.amount || 5) / 45));
+  events.on('guardAlert', () => press(0.07));
+  events.on('nearMiss', () => press(0.012));
+  events.on('playerDowned', () => press(1));
+  events.on('raidStart', () => { pressure = 0; peak = 0; lullT = 0; quietT = 0; });
 
   ctx.heat = {
     add, hunt, tiers: TIERS,
     get value() { return value; }, get tier() { return tier; }, get frac() { return value / 100; },
     get name() { return TIERS[tier - 1].name; }, get bonus() { return TIERS[tier - 1].bonus; },
+    get pressure() { return pressure; }, get lull() { return lullT > 0; },
     get lootLuck() { return (tier - 1) * 0.12; }, // chance that a common item in a container you open is re-rolled as a good one
   };
 
@@ -74,7 +85,15 @@ export function init(ctx) {
     update(dt) {
       if (!active || !ctx.raid || ctx.raid.state !== 'raid') { bar.hidden = true; return; }
       // hunting parties: from Alarm upward, guards are sent to where you are every so often
-      if (tier >= 3) { huntT -= dt; if (huntT <= 0) { hunt(tier - 2); huntT = 75 - tier * 10; } }
+      pressure = Math.max(0, pressure - dt * 0.035);
+      if (lullT > 0) { lullT -= dt; if (lullT <= 0) apply(); }
+      else if (peak > 0.8 && pressure < 0.35) { lullT = 22 + tier * 2; peak = 0; quietT = 0; apply(); } // the fight is over: let them breathe
+      if (pressure < 0.08 && lullT <= 0) quietT += dt; else quietT = 0;
+      if (quietT > 80 - tier * 8) { // too quiet for too long: stir the site
+        quietT = 0;
+        if (tier >= 2 || Math.random() < 0.5) hunt(1 + (tier > 2)); else if (ctx.drones) ctx.drones.spawnNow();
+      }
+      if (tier >= 3 && lullT <= 0) { huntT -= dt; if (huntT <= 0) { hunt(tier - 2); huntT = 75 - tier * 10; } }
       if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) banner.style.opacity = '0'; }
       bar.hidden = false;
       const key = Math.round(value) + tier * 1000;

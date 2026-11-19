@@ -67,6 +67,7 @@ export function init(ctx) {
       const items = raid.rollContents('vault');
       items.push({ supply: 'armor', name: 'Armour plate' }, { supply: 'medkit', name: 'Medkit' });
       if (Math.random() < 0.5) items.push({ supply: 'key', name: 'Keycard' });
+      if (raid.prizeGun) items.push(raid.prizeGun()); // a drop always holds a gun the shop does not sell
       d.loot = raid.addLootable('secure', d.x, 0, d.z, Math.random() * 3, items);
     }
     if (ctx.bots && ctx.bots.hunt) ctx.bots.hunt(new THREE.Vector3(d.x, 0, d.z), 3); // guards go to see what landed
