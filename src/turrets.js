@@ -30,7 +30,7 @@ function buildMesh() {
   add(head, new THREE.SphereGeometry(0.07, 10, 8), eye, 0, 0.09, 0.31);
   // a faint beam shows where it is looking, in the colour of its state
   const beamMat = new THREE.MeshBasicMaterial({ color: EYE.unaware, transparent: true, opacity: 0.05, depthWrite: false, side: THREE.DoubleSide, fog: false });
-  const beam = new THREE.Mesh(new THREE.ConeGeometry(2.6, 9, 14, 1, true), beamMat); beam.rotation.x = -Math.PI / 2; beam.position.set(0, 0.05, 4.85); head.add(beam);
+  const beam = new THREE.Mesh(new THREE.ConeGeometry(2.6, 9, 14, 1, true), beamMat); beam.rotation.x = -Math.PI / 2; beam.visible = false; // the view cone is not shown: the eye light alone tells you its state
   return { group: g, head, eye, beam: beamMat };
 }
 
