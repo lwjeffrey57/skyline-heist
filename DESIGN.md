@@ -6,6 +6,20 @@ Read this before changing anything. It is the shared brief for every person and 
 A single-player extraction shooter in the browser (Three.js + Vite). You deploy into a walled compound with a
 pistol, loot it, fight its guards, and get out through an exit with what you carry. Die and you lose it.
 
+## The vision: go in quiet, come out loud
+A raid opens tense and careful and ends as a running fight. Stealth is the opening act; as heat rises the player
+is meant to cut loose, and fast movement (sprint, slide-hop, vault, dash) and strong gunplay are the tools for
+getting out alive with the haul. The game should be exciting to play, with sick gunplay and movement.
+Test every mechanic against this: does it make the quiet start tenser, or the loud finish more thrilling? If it
+does neither, or it makes the player feel slow, helpless or bored, it does not belong.
+
+Consequences already decided:
+- The shop sells only basic gear. The best guns and attachments can only be found, so finding one matters.
+- Enemy types must each demand a different response from the player, not just more bullets.
+- Intensity should rise and fall: after a hard fight the game allows a lull; when it has been quiet too long it stirs.
+- The map is fixed and learnable (src/world2.js, a blockout for now). Things may persist between raids.
+- Design by subtraction: features that do not serve the vision get cut.
+
 ## Pillars, in priority order
 1. **The gunplay must feel amazing.** Shooting an enemy has to be a pleasure in itself: enemies visibly and audibly
    react to every hit, deaths respond to the shot that caused them, guns sound and kick with weight. If a change
