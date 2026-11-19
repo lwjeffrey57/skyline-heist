@@ -13,6 +13,7 @@ const ICON = {
   sniper: 'M1 11h22v2h-9l-1 2h-3v3H7v-3H1zM8 7h8v2H8z',
   launcher: 'M2 9h14v6H2zM16 10h6v4h-6zM6 15h3v4H6z',
   med: 'M9 3h6v6h6v6h-6v6H9v-6H3V9h6z',
+  revive: 'M12 21C6 16 3 12.5 3 8.8 3 6 5.2 4 7.8 4c1.7 0 3.2.9 4.2 2.3C13 4.9 14.500 4 16.200 4 18.800 4 21 6 21 8.800c0 3.700-3 7.200-9 12.200zM11 8v3H8v2h3v3h2v-3h3v-2h-3V8z',
   plate: 'M12 2l8 3v7c0 5-4 8-8 10-4-2-8-5-8-10V5z',
   att: 'M3 10h12v4H3zM15 9h3v6h-3zM18 10.5h3v3h-3zM6 14h3v4H6z',
   bag: 'M8 3h8v3h2a2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V8a2 2 0 012-2h2zM10 5v1h4V5zM8 12h8v2H8z',
@@ -22,9 +23,9 @@ const ICON = {
   epic: 'M12 2l3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z',
 };
 const WEAPON_ICON = { pistol: 'pistol', rifle: 'rifle', smg: 'rifle', dmr: 'sniper', shotgun: 'shotgun', slug_shotgun: 'shotgun', sniper: 'sniper', launcher: 'launcher', burst_rifle: 'rifle', burst_pistol: 'pistol', handcannon: 'pistol', lmg: 'rifle', lever: 'sniper', crossbow: 'sniper' };
-const COLOR = { common: '#c9d1d9', uncommon: '#5fd38a', rare: '#5aa9ff', epic: '#d48bff', weapon: '#ff8a3c', med: '#9be37a', plate: '#7fb4ff', bag: '#ffc56b' };
+const COLOR = { common: '#c9d1d9', uncommon: '#5fd38a', rare: '#5aa9ff', epic: '#d48bff', weapon: '#ff8a3c', med: '#9be37a', revive: '#ff7a8a', plate: '#7fb4ff', bag: '#ffc56b' };
 export const BAGS = { 4: { name: 'Sling pack', cost: 800 }, 8: { name: 'Field ruck', cost: 2000 } }; // backpacks add this many pack slots
-const SUPPLY = { med: { name: 'Medkit', cost: 150, desc: 'Heals 60. Press H in a raid.' }, plate: { name: 'Armour plate', cost: 300, desc: '+50 armour when you deploy.' } };
+const SUPPLY = { med: { name: 'Medkit', cost: 150, desc: 'Heals 60. Press H in a raid.' }, plate: { name: 'Armour plate', cost: 300, desc: '+50 armour when you deploy.' }, revive: { name: 'Self-revive kit', cost: 900, desc: 'Carry it in your pack. When you are downed, hold F to get back up. One use.' } };
 export const STASH_SLOTS = 40;
 import { STATIONS, TRADERS, taskState, stationLevel, canBuild, build, claim, countItem } from './progress.js';
 const esc = (s) => String(s).replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));

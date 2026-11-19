@@ -110,10 +110,10 @@ export function init(ctx) {
         vit.classList.toggle('low', hp / max < 0.3);
         armB.style.width = `${Math.min(100, armor)}%`; arL.textContent = armor ? `Armour ${armor}` : 'No armour';
       }
-      const k = `${raid.medkits}|${raid.keycards}`;
+      const k = `${raid.medkits}|${raid.keycards}|${raid.revives}`;
       if (k !== lastKit) {
         lastKit = k;
-        kit.innerHTML = `<span><i class="pip" style="background:#8ff0c8"></i>Medkits <b>${raid.medkits}</b><kbd>H</kbd></span>${raid.keycards ? `<span style="color:#d48bff"><i class="pip" style="background:#d48bff"></i>Keycards <b>${raid.keycards}</b></span>` : ''}`;
+        kit.innerHTML = `<span><i class="pip" style="background:#8ff0c8"></i>Medkits <b>${raid.medkits}</b><kbd>H</kbd></span>${raid.revives ? `<span style="color:#ff7a8a"><i class="pip" style="background:#ff7a8a"></i>Revive <b>${raid.revives}</b></span>` : ''}${raid.keycards ? `<span style="color:#d48bff"><i class="pip" style="background:#d48bff"></i>Keycards <b>${raid.keycards}</b></span>` : ''}`;
       }
     },
   };

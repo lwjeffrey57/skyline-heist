@@ -12,6 +12,7 @@ const STEP = 0.5;
 const ZIP_SPEED = 15, ZIP_HANG = 2.1;
 const DASH = { speed: 27, time: 0.3, cooldown: 3, carry: 11 }; // Q: a short burst in the direction you are moving
 
+const DOWN_BLOCK = ['Mouse0', 'Mouse2', 'KeyR', 'KeyG', 'KeyQ', 'KeyE', 'KeyB', 'Space', 'ShiftLeft', 'WheelUp', 'WheelDown', 'Digit1', 'Digit2', 'Digit3'];
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
 
 export class Player {
@@ -36,7 +37,7 @@ export class Player {
     this.dashCd = 0; this.dashT = 0; this.dashMax = DASH.cooldown; this.dashX = 0; this.dashZ = 0;
     this.landGrace = 0; this.sprintT = 0; this.cutJump = false; this.mExit = 4.5;
     this.prompt = '';
-    this.hp = this.maxHp; this.alive = true; this.hurtT = 99;
+    this.hp = this.maxHp; this.alive = true; this.hurtT = 99; this.downed = false;
   }
 
   emit(name, data) { if (this.events) this.events.emit(name, data); }
@@ -45,8 +46,10 @@ export class Player {
   // info: { from: Vector3 (where the damage came from), source }
   takeDamage(amount, info = {}) {
     if (!this.alive || this.protectT > 0) return;
+    if (this.downed) { if (this.downHit) this.downHit(amount, info); return; } // already down: hits only hurry the end
     this.hp -= amount; this.hurtT = 0;
     this.emit('playerDamaged', { amount, hp: this.hp, ...info });
+    if (this.hp <= 0 && this.downHook && this.downHook(info)) return; // knocked down instead of killed (see downed.js)
     if (this.hp <= 0) { this.emit('playerDied', info); this.respawn(); this.emit('playerRespawned', {}); }
   }
 
@@ -120,7 +123,7 @@ export class Player {
     const inp = this.input;
     this.slideCd -= dt; this.mantleCd -= dt; this.padCd -= dt;
     if (this.protectT > 0) this.protectT -= dt;
-    this.hurtT += dt; if (this.hurtT > 5 && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + 25 * dt);
+    this.hurtT += dt; if (this.hurtT > 5 && this.hp < this.maxHp && !this.downed) this.hp = Math.min(this.maxHp, this.hp + 25 * dt);
     if (inp.pressed.has('Space')) this.jumpBuffer = 0.14; else this.jumpBuffer -= dt;
     if ((inp.pressed.has('KeyK') && !this.noManualRespawn) || this.pos.y < -30) this.respawn();
 
@@ -130,7 +133,8 @@ export class Player {
     const ms = (inp.down('KeyD') ? 1 : 0) - (inp.down('KeyA') ? 1 : 0);
     let wx = fx * mf + cos * ms, wz = fz * mf - sin * ms;
     const wl = Math.hypot(wx, wz); if (wl > 0) { wx /= wl; wz /= wl; }
-    const wantCrouch = inp.down('KeyC') || inp.down('ControlLeft');
+    if (this.downed) for (const k of DOWN_BLOCK) { inp.keys.delete(k); inp.pressed.delete(k); } // down: you can crawl and look, nothing else
+    const wantCrouch = this.downed || inp.down('KeyC') || inp.down('ControlLeft');
     this.prompt = '';
 
     if (this.state === 'mantle') {
@@ -174,7 +178,7 @@ export class Player {
 
     // ---- camera -----------------------------------------------------------
     const hs = Math.hypot(this.vel.x, this.vel.z);
-    this.eye = damp(this.eye, this.h - 0.15, 14, dt);
+    this.eye = damp(this.eye, this.h - 0.15 - (this.downed ? 0.45 : 0), this.downed ? 6 : 14, dt);
     this.stepSmooth = damp(this.stepSmooth, 0, 16, dt);
     this.dipV += (-180 * this.dip - 22 * this.dipV) * dt; this.dip += this.dipV * dt;
     let bobY = 0, bobX = 0;
@@ -189,7 +193,7 @@ export class Player {
     const sideSpeed = this.vel.x * cos - this.vel.z * sin;
     const leanTarget = this.state === 'normal' && this.grounded && !this.sliding ? THREE.MathUtils.clamp(sideSpeed / WALK, -1, 1) : 0;
     this.leanV += (-110 * (this.strafeLean - leanTarget) - 15 * this.leanV) * dt; this.strafeLean += this.leanV * dt;
-    const rollTarget = this.dashT > 0 ? -(this.dashSide || 0) * 0.09 : this.sliding ? 0.07 : this.state === 'zip' ? 0.03 : -this.strafeLean * 0.034;
+    const rollTarget = this.downed ? 0.22 : this.dashT > 0 ? -(this.dashSide || 0) * 0.09 : this.sliding ? 0.07 : this.state === 'zip' ? 0.03 : -this.strafeLean * 0.034;
     this.roll = damp(this.roll, rollTarget, 14, dt);
     const side = this.strafeLean * 0.05 + bobX;
     const cam = this.camera;
@@ -228,7 +232,7 @@ export class Player {
         if (hs > 0) { const drop = Math.max(hs, 2.2) * (this.landGrace > 0 ? 1 : 8) * dt; const k = Math.max(0, hs - drop) / hs; v.x *= k; v.z *= k; }
         // a body has inertia: backing up and side-stepping are a little slower than running forward
         const dirScale = mf < 0 ? 0.84 : mf === 0 && ms !== 0 ? 0.92 : 1;
-        const max = (this.crouching ? CROUCH_SPEED : sprinting ? SPRINT + (this.sprintT / 1.2) * 0.9 : WALK) * this.speedScale * dirScale;
+        const max = (this.crouching ? CROUCH_SPEED : sprinting ? SPRINT + (this.sprintT / 1.2) * 0.9 : WALK) * this.speedScale * dirScale * (this.downed ? 0.4 : 1);
         const cur = v.x * wx + v.z * wz, add = Math.min(Math.max(0, max - cur), 78 * dt);
         v.x += wx * add; v.z += wz * add;
       }
@@ -318,7 +322,7 @@ export class Player {
         if (Math.abs(this.pos.x - L.x) > 1.2 || Math.abs(this.pos.z - L.z) > 1.2 || this.pos.y > L.y1 - 1.5 || this.pos.y < L.y0 - 0.5) continue;
         const toward = -(fx * L.nx + fz * L.nz); // facing the wall
         if (L.fast) { this.prompt = '<b>E</b> — ride the line to the roof'; if (!inp.pressed.has('KeyE')) continue; }
-        else { this.prompt = '<b>W</b> — climb the ladder'; if (!(mf > 0 && toward > 0.5) && !inp.pressed.has('KeyE')) continue; }
+        else { if (this.downed) continue; this.prompt = '<b>W</b> — climb the ladder'; if (!(mf > 0 && toward > 0.5) && !inp.pressed.has('KeyE')) continue; }
         this.state = 'climb'; this.lad = L; this.sliding = false; this.crouching = false; this.h = STAND; this.grounded = false; v.set(0, 0, 0);
         this.emit(L.fast ? 'zipStart' : 'mantle', {});
         break;

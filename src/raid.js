@@ -99,7 +99,8 @@ function rollContents(kind) {
     if (Math.random() < 0.03) { const size = Math.random() < 0.25 ? 8 : 4; out.push({ supply: 'bag', size, name: BAGS[size].name }); continue; }
     if (ATTACH.length && Math.random() < 0.04 * Math.min(2, c.luck)) { out.push(rollAttachment(c.luck)); continue; }
     const r = Math.random();
-    if (r < 0.14) out.push({ supply: 'medkit', name: 'Medkit' });
+    if (r < 0.012 * c.luck) out.push({ supply: 'revive', name: 'Self-revive kit' });
+    else if (r < 0.14) out.push({ supply: 'medkit', name: 'Medkit' });
     else if (r < 0.26) out.push({ supply: 'armor', name: 'Armour plate' });
     else if (r < 0.42) out.push({ supply: 'ammo', name: 'Ammo box' });
     else out.push(rollItem(c.luck));
@@ -193,6 +194,7 @@ export function init(ctx) {
   let keycards = 0, phase = 0, lateExit = false, exitSec = 0; // keycards open vault cases; the raid escalates in phases
   let exitCallT = -99;
   let reveal = null; // the container being emptied, one item at a time
+  let revives = 0, broughtRev = 0; // self-revive kits carried this raid
   const brought = new Set(); let broughtMed = 0, menu = null; // weapons and medkits taken in from the loadout
   const raidGuns = new Set(); // weapons carried this raid (brought or found): kept on extraction, lost otherwise
 
@@ -307,6 +309,7 @@ export function init(ctx) {
     }
     if (item.supply === 'key') { keycards++; chime([880, 1175, 1568], 0.07, 0.3, 0.2); toast('+ Keycard <span style="opacity:.7">opens the strongroom on the plaza</span>', '#d48bff'); return true; }
     if (item.supply) chime([440], 0.05, 0.1, 0.12, 'square');
+    if (item.supply === 'revive') { if (revives >= 2) return false; revives++; chime([523, 659, 784], 0.07, 0.3, 0.2); toast('+ Self-revive kit <span style="opacity:.7">hold F when downed</span>', '#ff7a8a'); return true; }
     if (item.supply === 'medkit') { if (medkits >= 4) return false; medkits++; toast('+ Medkit', '#9be37a'); return true; }
     if (item.supply === 'armor') { if (armor >= 100) return false; armor = Math.min(100, armor + 40); toast('+ Armour plate', '#7fb4ff'); return true; }
     if (item.supply === 'ammo') { if (ctx.weapons && ctx.weapons.addAmmo) ctx.weapons.addAmmo(0.35); toast('+ Ammo', '#ffc56b'); return true; }
@@ -410,10 +413,10 @@ export function init(ctx) {
     player.maxHp = 100 + (stash.upgrades.health ? 25 : 0); // med bay level 2
     state = 'raid'; timeLeft = RAID.time + (stash.upgrades.time ? 90 : 0); pack = []; holdT = 0; exitT = 0; result = null; reveal = null; raidGuns.clear();
     // everything in the pack comes along: supplies are put to use, valuables ride in the pack (and are at risk)
-    medkits = baseMed(); armor = baseArmor(); broughtMed = 0; brought.clear();
+    medkits = baseMed(); armor = baseArmor(); broughtMed = 0; brought.clear(); revives = 0; broughtRev = 0;
     for (const it of stash.pack || []) {
       if (!it) continue;
-      if (it.t === 'med') { medkits++; broughtMed++; } else if (it.t === 'plate') armor = Math.min(100, armor + 50);
+      if (it.t === 'med') { medkits++; broughtMed++; } else if (it.t === 'revive') { revives++; broughtRev++; } else if (it.t === 'plate') armor = Math.min(100, armor + 50);
       else if (it.t === 'loot') pack.push({ name: it.name, tier: it.tier, value: it.value });
     }
     stash.pack = (stash.pack || []).map(() => null); stash.inRaid = true;
@@ -472,6 +475,7 @@ export function init(ctx) {
       if (foundBag) { const old = stash.b && stash.b[0]; stash.b = [{ t: 'bag', size: foundBag }]; if (old) menu.addToStash(old); } // the bigger backpack is now yours
       const back = items.map((i) => (i.att ? { t: 'att', id: i.att } : { t: 'loot', name: i.name, tier: i.tier, value: i.value }));
       for (let n = Math.min(broughtMed, Math.max(0, medkits - baseMed())); n > 0; n--) back.push({ t: 'med' });
+      for (let n = revives; n > 0; n--) back.push({ t: 'revive' }); // unused kits, brought or found, come home
       stash.pack = back; menu.normalise();
       for (const extra of stash.pack.splice(packSize())) if (extra) menu.addToStash(extra);
       for (const id of raidGuns) if (!brought.has(id)) { menu.addToStash({ t: 'weapon', id }); bump(stash, 'foundGun'); }
@@ -632,7 +636,7 @@ export function init(ctx) {
     contractsHtml: () => contractRows(false),
     onDeploy: () => { deploy(); const o = document.getElementById('overlay'); if (o) o.click(); }, // the click also captures the mouse
   });
-  ctx.raid = { toast, chime, addLootable, rollContents, districtAt, get heat() { return ctx.heat ? ctx.heat.frac : 0; }, get heatTier() { return ctx.heat ? ctx.heat.tier : 1; }, menu, config: RAID, stash, get state() { return state; }, get pack() { return pack; }, get timeLeft() { return timeLeft; }, set timeLeft(t) { timeLeft = t; }, lootables, zones, deploy, endRaid, get armor() { return armor; }, get contracts() { return contracts; }, get keycards() { return keycards; }, get revealT() { return revealT; }, get packOpen() { return packOpen; }, get bagBonus() { return bagBonus; }, packSize, set keycards(n) { keycards = n; }, get phase() { const t = ctx.heat ? ctx.heat.tier : 1; return t >= 4 ? 2 : t >= 2 ? 1 : 0; }, setContracts(ids) { contracts = ids.map((id) => ({ def: CONTRACTS.find((c) => c.id === id), n: 0, done: false })); }, get medkits() { return medkits; } };
+  ctx.raid = { get revives() { return revives; }, useRevive() { if (revives <= 0) return false; revives--; return true; }, toast, chime, addLootable, rollContents, districtAt, get heat() { return ctx.heat ? ctx.heat.frac : 0; }, get heatTier() { return ctx.heat ? ctx.heat.tier : 1; }, menu, config: RAID, stash, get state() { return state; }, get pack() { return pack; }, get timeLeft() { return timeLeft; }, set timeLeft(t) { timeLeft = t; }, lootables, zones, deploy, endRaid, get armor() { return armor; }, get contracts() { return contracts; }, get keycards() { return keycards; }, get revealT() { return revealT; }, get packOpen() { return packOpen; }, get bagBonus() { return bagBonus; }, packSize, set keycards(n) { keycards = n; }, get phase() { const t = ctx.heat ? ctx.heat.tier : 1; return t >= 4 ? 2 : t >= 2 ? 1 : 0; }, setContracts(ids) { contracts = ids.map((id) => ({ def: CONTRACTS.find((c) => c.id === id), n: 0, done: false })); }, get medkits() { return medkits; } };
   setBots(false); player.protectT = 1e9;
   panel.hidden = true; menu.show(); saveStash(stash);
 
