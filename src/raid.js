@@ -231,9 +231,10 @@ export function init(ctx) {
       const ix = b.w / 2 - 1.6, iz = b.d / 2 - 1.6;
       for (let f = 0; f < b.floors; f++) {
         const y = f * b.floorHeight, kind = f === 0 ? 'standard' : 'secure';
-        for (const [sx, sz] of [[-1, -1], [1, 1], [-1, 1], [1, -1]]) if (Math.random() < (f === 0 ? 0.28 : 0.32)) spots.push([kind, b.x + sx * ix, y, b.z + sz * iz]);
+        const inKeep = (px, pz) => b.keep && b.keep.some(([a0, a1, c0, c1]) => px > a0 && px < a1 && pz > c0 && pz < c1); // not on a stair core or over an open well
+        for (const [sx, sz] of [[-1, -1], [1, 1], [-1, 1], [1, -1]]) if (Math.random() < (f === 0 ? 0.28 : 0.32) && !inKeep(b.x + sx * ix, b.z + sz * iz)) spots.push([kind, b.x + sx * ix, y, b.z + sz * iz]);
       }
-      spots.push([b.floors >= 3 && !world.strongroom ? 'vault' : 'secure', b.x + rnd(-2, 2), b.roofY, b.z - b.d / 2 + 2.2, true]);
+      spots.push([b.floors >= 3 && !world.strongroom ? 'vault' : 'secure', b.x + rnd(-2, 2), b.roofY, b.stairAt && b.stairAt[1] < b.z - 0.5 ? b.z + b.d / 2 - 2.2 : b.z - b.d / 2 + 2.2, true]);
     }
     for (const [x, z] of [[-9, 26], [44, 9], [-54, 5], [10, -44], [-10, -40], [52, -46], [-56, -36], [3, 4.5], [-4.5, -3], [30, 40], [-40, 12], [20, -4]]) spots.push(['standard', x, 0, z]);
     // arms lockers: one on the top floor of five random buildings, each holding a weapon you did not deploy with

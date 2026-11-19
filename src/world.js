@@ -131,10 +131,20 @@ export function createWorld(scene, renderer) {
 
   const buildings = [];
   const lod = []; // per building: the interior meshes that need not be drawn from far away
-  function building(x, z, w, d, floors, accent) {
+  // where a building's stair core goes: the middle, a corner, or one end of the floor. Returns its centre.
+  function stairSpot(x, z, w, d, mode) {
+    const sx = rand() < 0.5 ? -1 : 1, sz = rand() < 0.5 ? -1 : 1;
+    if (mode === 'corner') return [x + sx * (w / 2 - 4.5), z + sz * (d / 2 - 3.6)];
+    if (mode === 'endX') return [x + sx * (w / 2 - 4.5), z];
+    if (mode === 'endZ') return [x, z + sz * (d / 2 - 3.6)];
+    return [x, z];
+  }
+  const anyStair = () => { const r = rand(); return r < 0.25 ? 'centre' : r < 0.6 ? 'corner' : r < 0.8 ? 'endX' : 'endZ'; };
+  function building(x, z, w, d, floors, accent, stair = 'centre') {
     const first = colliders.length;
     const x0 = x - w / 2, x1 = x + w / 2, z0 = z - d / 2, z1 = z + d / 2;
-    const hx0 = x - 2.7, hx1 = x + 2.7;
+    const [cx, cz] = stairSpot(x, z, w, d, stair);
+    const hx0 = cx - 2.7, hx1 = cx + 2.7;
     for (let f = 0; f < floors; f++) {
       const y0 = f * FH;
       wallRun(true, z0 + T / 2, x0, x1, y0, f === 0, accent);
@@ -144,7 +154,7 @@ export function createWorld(scene, renderer) {
 
       // U-turn stairs: even floors climb +x in lane A, odd floors climb -x in lane B.
       const lane = f % 2;
-      const lz0 = lane === 0 ? z - 1.7 : z + 0.1, lz1 = lz0 + 1.6;
+      const lz0 = lane === 0 ? cz - 1.7 : cz + 0.1, lz1 = lz0 + 1.6;
       const steps = 15, rise = FH / steps, run = (hx1 - hx0) / steps;
       for (let s = 0; s < steps; s++) {
         const sx = lane === 0 ? hx0 + run * (s + 0.5) : hx1 - run * (s + 0.5);
@@ -166,7 +176,7 @@ export function createWorld(scene, renderer) {
     addBox(x0 + T / 2, ry, z, T, 1.0, d - T * 2, M.concrete, B('parapet'));
     addBox(x1 - T / 2, ry, z, T, 1.0, d - T * 2, M.concrete, B('parapet'));
     addBox(x, ry + 1.0, z0 + T / 2, w, 0.06, T + 0.04, accent === M.teal ? M.glowTeal : M.glowAmber, { solid: false, shadow: false, attachTo: front });
-    buildings.push({ x, z, w, d, floors, floorHeight: FH, wallThickness: T, roofY: ry, accent });
+    buildings.push({ x, z, w, d, floors, floorHeight: FH, wallThickness: T, roofY: ry, accent, stairAt: [cx, cz], keep: stair === 'centre' ? null : [[cx - 4.4, cx + 4.4, cz - 3.3, cz + 3.3]] });
     lod.push({ x, z, far: false, meshes: colliders.slice(first).filter((c) => c.tag === 'stair' || (c.tag === 'slab' && c.max.y < ry - 0.1)).map((c) => c.mesh) });
     return ry;
   }
@@ -183,7 +193,7 @@ export function createWorld(scene, renderer) {
     const order = LOTS.map((l) => [rand(), l]).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
     const count = 4 + Math.floor(rand() * 3); // 4 to 6 of the 7 lots
     for (const [x, z, mw, md] of order.slice(0, count)) {
-      building(x + jit(1), z + jit(1), rand() < 0.5 ? mw : 12, rand() < 0.5 ? md : 10, rand() < 0.45 ? 1 : 2, pick(ACCENTS));
+      building(x + jit(1), z + jit(1), rand() < 0.5 ? mw : 12, rand() < 0.5 ? md : 10, rand() < 0.45 ? 1 : 2, pick(ACCENTS), anyStair());
     }
   }
 
@@ -307,7 +317,7 @@ export function createWorld(scene, renderer) {
     // a few small sheds: cover on the way in, but no guards are posted in them and they hold no lockers
     for (const [x, z] of [[-140, -106], [140, 20], [48, -141], [-54, 141], [136, -120], [-140, 96], [10, 140], [-136, -20]]) {
       if (rand() < 0.45 || !clearOf(x - 6, x + 6, z - 5, z + 5, 6)) continue;
-      building(x + jit(1), z + jit(1), 12, 10, 1, pick(ACCENTS));
+      building(x + jit(1), z + jit(1), 12, 10, 1, pick(ACCENTS), anyStair());
       outbuildings.push(buildings.pop());
     }
     // outposts: guarded buildings out in the ring, each with its own loot, so the site has more than one place worth raiding
@@ -316,7 +326,7 @@ export function createWorld(scene, renderer) {
     const TYPES = ['armoury', 'infirmary', 'signal', 'depot', 'watch'].map((t) => [rand(), t]).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
     for (const [ox, oz] of order.slice(0, 5)) {
       const x = ox + jit(3), z = oz + jit(3);
-      building(x, z, rand() < 0.5 ? 14 : 12, rand() < 0.5 ? 12 : 10, rand() < 0.5 ? 1 : 2, pick(ACCENTS)); // stays in `buildings`: guards post here and it gets crates
+      building(x, z, rand() < 0.5 ? 14 : 12, rand() < 0.5 ? 12 : 10, rand() < 0.5 ? 1 : 2, pick(ACCENTS), anyStair()); // stays in `buildings`: guards post here and it gets crates
       buildings[buildings.length - 1].outpost = TYPES.pop(); // each outpost has a purpose (raid.js gives it its contents)
       { // a walled yard with two ways in, so you choose which side to come at it from
         const Y = 14, open = [0, 1, 2, 3].map((i) => [rand(), i]).sort((p, q) => p[0] - q[0]).slice(0, 2).map((p) => p[1]);
@@ -337,10 +347,11 @@ export function createWorld(scene, renderer) {
     // tower blocks: two of the lots the outposts did not take get a large multi-storey building with rooms on every
     // floor, and a zipline from its roof down into the centre
     const tower = (x, z, W2, D2, floors) => {
-      building(x, z, W2, D2, floors, pick(ACCENTS));
+      building(x, z, W2, D2, floors, pick(ACCENTS), rand() < 0.3 ? 'centre' : 'endZ'); // towers keep their stairs between the partition walls: in the middle or at one end
       const b = buildings[buildings.length - 1]; b.tower = true;
+      const sc = b.stairAt[1] - z; // partition doorways line up with wherever the stair core is
       const h = D2 / 2 - 0.3, px = Math.round(W2 / 3.2);
-      for (let f = 0; f < floors; f++) for (const sx of [-1, 1]) for (const [z0, z1] of [[-h, -4.1], [-2.3, 2.3], [4.1, h]]) // partition walls with doorways, either side of the stair core
+      for (let f = 0; f < floors; f++) for (const sx of [-1, 1]) for (const [z0, z1] of (Math.abs(sc) < 0.1 ? [[-h, -4.1], [-2.3, 2.3], [4.1, h]] : sc < 0 ? [[-h + 6.2, -1.2], [1.2, h]] : [[-h, -1.2], [1.2, h - 6.2]])) // partition walls with doorways, either side of the stair core
         lod[lod.length - 1].meshes.push(addBox(x + sx * px, f * FH, z + (z0 + z1) / 2, 0.25, FH - SLAB, z1 - z0, M.concrete, B('wall')));
       const dl = Math.hypot(x, z) || 1, dx = -x / dl, dz = -z / dl; // toward the middle of the compound
       for (const reach of [50, 42, 34]) {
@@ -514,6 +525,46 @@ export function createWorld(scene, renderer) {
   zipline(new THREE.Vector3(33, roofB + 3.4, -12.2), new THREE.Vector3(46, 8.6, 20), roofB, 0);
   for (const [a, b, roofY] of towerZips) zipline(a, b, roofY, 0);
 
+  // ---- ladders and ascender lines: other ways up the outside of the taller buildings ---------------------
+  // A ladder is climbed by walking into it (W up, S down, Space to let go). An ascender is a powered line: E and it
+  // hauls you to the roof. Each is { x, z (where you hang), y0, y1 (parapet top), nx, nz (pointing away from the wall),
+  // tx, tz (where you step off on the roof), roofY, fast }.
+  const ladders = [];
+  {
+    const rungs = [];
+    const place = (b, side, fast) => {
+      const alongX = side < 2, sgn = side % 2 ? 1 : -1, len = alongX ? b.w : b.d;
+      const off = (rand() < 0.5 ? -1 : 1) * len * (0.28 + rand() * 0.1); // a quarter of the way along: clear of the door in the middle
+      const nx = alongX ? 0 : sgn, nz = alongX ? sgn : 0;
+      const wx = alongX ? b.x + off : b.x + sgn * b.w / 2, wz = alongX ? b.z + sgn * b.d / 2 : b.z + off; // on the wall face
+      const x = wx + nx * 0.55, z = wz + nz * 0.55;
+      if (blocked(x - 0.4, x + 0.4, z - 0.4, z + 0.4, 0.05) || onRoad(x - 0.5, x + 0.5, z - 0.5, z + 0.5)) return false;
+      if (ladders.some((l) => Math.hypot(l.x - x, l.z - z) < 3)) return false;
+      const y1 = b.roofY + 1.0, fx = wx + nx * 0.14, fz = wz + nz * 0.14, lx = alongX ? 1 : 0, lz = alongX ? 0 : 1;
+      if (fast) {
+        addBox(fx + nx * 0.3, 0, fz + nz * 0.3, 0.05, y1 + 1.3, 0.05, M.glowAmber, { solid: false, shadow: false }); // the line
+        addBox(fx + nx * 0.1, y1 + 1.2, fz + nz * 0.1, alongX ? 0.14 : 0.7, 0.14, alongX ? 0.7 : 0.14, M.metal, { solid: false }); // arm over the parapet
+        addBox(fx + nx * 0.3, 0, fz + nz * 0.3, 0.5, 0.25, 0.5, M.metal, { solid: false }); // winch at the foot
+      } else {
+        for (const s of [-0.26, 0.26]) addBox(fx + lx * s, 0, fz + lz * s, 0.06, y1 + 0.5, 0.06, M.metal, { solid: false, shadow: false });
+        for (let y = 0.35; y < y1 + 0.3; y += 0.42) rungs.push([fx, y, fz, alongX]);
+      }
+      ladders.push({ x, z, y0: 0, y1, nx, nz, tx: wx - nx * 1.4, tz: wz - nz * 1.4, roofY: b.roofY, fast });
+      return true;
+    };
+    for (const b of buildings) {
+      if (b.roofY < 7) continue; // two storeys and up
+      const sides = [0, 1, 2, 3].map((i) => [rand(), i]).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
+      let n = 0; const want = b.hq ? 3 : b.floors >= 3 || b.warehouse ? 2 : rand() < 0.6 ? 1 : 0;
+      for (const sd of sides) { if (n >= want) break; if (place(b, sd, n === 1 || (b.hq && n === 2 ? false : n === 1))) n++; }
+    }
+    if (rungs.length) { // every rung of every ladder is one instanced mesh
+      const im = new THREE.InstancedMesh(new THREE.BoxGeometry(0.52, 0.04, 0.04), M.metal, rungs.length), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1), v3 = new THREE.Vector3();
+      rungs.forEach(([x, y, z, alongX], i) => { q.setFromAxisAngle(up, alongX ? 0 : Math.PI / 2); im.setMatrixAt(i, m4.compose(v3.set(x, y, z), q, one)); });
+      im.instanceMatrix.needsUpdate = true; scene.add(im);
+    }
+  }
+
   // ---- distant skyline (visual only) --------------------------------------
   const skyRand = rng(99);
   for (let i = 0; i < 70; i++) {
@@ -530,7 +581,7 @@ export function createWorld(scene, renderer) {
 
   // ---- queries & edits used by the other systems ---------------------------
   const world = {
-    colliders, pads, ziplines, buildings, materials: M, arenaHalf: ARENA, coreHalf: CORE, spawnPoints, exitPoints, outbuildings, roads, compoundWalls, seed, strongroom,
+    colliders, pads, ziplines, ladders, buildings, materials: M, arenaHalf: ARENA, coreHalf: CORE, spawnPoints, exitPoints, outbuildings, roads, compoundWalls, seed, strongroom,
     spawn: new THREE.Vector3(0, 0, 50),
     // nearest solid box along a ray -> { collider, point, normal, dist } or null
     // every solid piece touching the box x0..x1, z0..z1 (any height), written into `out` and returned

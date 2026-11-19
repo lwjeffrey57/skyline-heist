@@ -143,6 +143,18 @@ export class Player {
         this.state = 'normal'; this.vel.set(this.mDir.x * this.mExit, 0, this.mDir.z * this.mExit); this.landGrace = 0.15;
         this.grounded = true; this.mantleCd = 0.25;
       }
+    } else if (this.state === 'climb') {
+      // on a ladder (W up, S down) or an ascender line (hauls you up by itself); Space lets go
+      const L = this.lad, dir = L.fast ? 1 : (inp.down('KeyW') ? 1 : 0) - (inp.down('KeyS') ? 1 : 0);
+      this.pos.set(L.x, this.pos.y + dir * (L.fast ? 13 : 5.2) * dt, L.z); this.vel.set(0, dir * (L.fast ? 13 : 5.2), 0);
+      if (!L.fast && dir !== 0) { this.climbStep = (this.climbStep || 0) + dt; if (this.climbStep > 0.34) { this.climbStep = 0; this.emit('footstep', { speed: 4 }); } }
+      if (this.jumpBuffer > 0) { this.state = 'normal'; this.jumpBuffer = 0; this.vel.set(L.nx * 4.5, 3.5, L.nz * 4.5); this.grounded = false; this.mantleCd = 0.3; this.ladCd = 0.5; }
+      else if (this.pos.y <= L.y0 && dir < 0) { this.pos.y = L.y0 + 0.02; this.state = 'normal'; this.ladCd = 0.4; }
+      else if (this.pos.y >= L.y1 - 1.0) { // over the parapet and onto the roof
+        this.state = 'mantle'; this.mFrom = this.pos.clone(); this.mTo = new THREE.Vector3(L.tx, L.roofY + 0.01, L.tz);
+        this.mT = 0; this.mDur = 0.3; this.mExit = 3; this.h = CROUCH; this.crouching = true; this.sliding = false; this.mDir = new THREE.Vector3(-L.nx, 0, -L.nz); this.ladCd = 0.6;
+        this.emit('mantle', {});
+      }
     } else if (this.state === 'zip') {
       const z = this.zip;
       this.zipT += this.zipSign * ZIP_SPEED * dt;
@@ -283,6 +295,20 @@ export class Player {
     // vault: sprint into waist-high cover or a window sill and you go straight over it
     else if (this.grounded && this.blocked && sprinting && hs0 > 6.5 && this.mantleCd <= 0 && this.tryMantle(fx, fz, 1.35, hs0)) this.emit('vault', {});
 
+    // ladders and ascender lines
+    this.ladCd = (this.ladCd || 0) - dt;
+    if (this.state === 'normal' && this.ladCd <= 0 && this.world.ladders) {
+      for (const L of this.world.ladders) {
+        if (Math.abs(this.pos.x - L.x) > 1.2 || Math.abs(this.pos.z - L.z) > 1.2 || this.pos.y > L.y1 - 1.5 || this.pos.y < L.y0 - 0.5) continue;
+        const toward = -(fx * L.nx + fz * L.nz); // facing the wall
+        if (L.fast) { this.prompt = '<b>E</b> — ride the line to the roof'; if (!inp.pressed.has('KeyE')) continue; }
+        else { this.prompt = '<b>W</b> — climb the ladder'; if (!(mf > 0 && toward > 0.5) && !inp.pressed.has('KeyE')) continue; }
+        this.state = 'climb'; this.lad = L; this.sliding = false; this.crouching = false; this.h = STAND; this.grounded = false; v.set(0, 0, 0);
+        this.emit(L.fast ? 'zipStart' : 'mantle', {});
+        break;
+      }
+    }
+
     // ziplines
     const near = this.nearestZip();
     if (near && this.state === 'normal') {
@@ -299,7 +325,7 @@ export class Player {
 
   get label() {
     if (this.state === 'zip') return 'zipline';
-    if (this.state === 'mantle') return 'climb';
+    if (this.state === 'mantle' || this.state === 'climb') return 'climb';
     if (this.sliding) return 'slide';
     if (!this.grounded) return 'air';
     if (this.crouching) return 'crouch';

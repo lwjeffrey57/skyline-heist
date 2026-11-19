@@ -60,6 +60,8 @@ export function init(ctx) {
     // ziplines and pads
     g.strokeStyle = '#ffc56b'; for (const z of world.ziplines) { if (z.dead) continue; g.beginPath(); g.moveTo(X(z.a.x), Z(z.a.z)); g.lineTo(X(z.b.x), Z(z.b.z)); g.stroke(); }
     g.fillStyle = '#35e0d8'; for (const p of world.pads) { g.beginPath(); g.arc(X(p.x), Z(p.z), 4, 0, Math.PI * 2); g.fill(); }
+    // ladders and ascender lines
+    for (const l of world.ladders || []) { g.fillStyle = l.fast ? '#ffc56b' : '#cfd6dd'; g.fillRect(X(l.x) - 2, Z(l.z) - 2, 4, 4); }
     // strongroom
     if (world.strongroom) { g.fillStyle = '#d48bff'; g.fillRect(X(-4), Z(-3), 8 * K, 6 * K); g.fillStyle = '#14100a'; g.font = '700 9px "Bahnschrift","Arial Narrow",sans-serif'; g.fillText(world.strongroom.open ? 'OPEN' : 'VAULT', X(0), Z(0)); }
     // lockers you have been near
