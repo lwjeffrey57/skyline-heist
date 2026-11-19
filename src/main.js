@@ -15,6 +15,7 @@ import * as dmgnum from './dmgnum.js';
 import * as settings from './settings.js';
 import * as map from './map.js';
 import * as hudplus from './hudplus.js';
+import * as dash from './dash.js';
 import * as drones from './drones.js';
 import * as turrets from './turrets.js';
 import * as heat from './heat.js';
@@ -47,7 +48,7 @@ events.on('pieceSplit', ({ collider, parts }) => {
 events.on('pieceDestroyed', ({ collider }) => { if (collider.zipline) world.removeZipline(collider.zipline); });
 
 const systems = [];
-for (const [name, mod] of Object.entries({ destruction, decor, fx, audio, weapons, bots, raid, heat, worldevents, detect, ui, hudplus, dmgnum, settings, map, drones, turrets })) {
+for (const [name, mod] of Object.entries({ destruction, decor, fx, audio, weapons, bots, raid, heat, worldevents, detect, ui, hudplus, dash, dmgnum, settings, map, drones, turrets })) {
   try { const s = mod.init(ctx); if (s) systems.push({ name, ...s }); } catch (e) { console.error(`[${name}] init failed`, e); }
 }
 

@@ -10,6 +10,7 @@ const WALK = 5.5, SPRINT = 8.6, CROUCH_SPEED = 3.0;
 const JUMP = 8.4;
 const STEP = 0.5;
 const ZIP_SPEED = 15, ZIP_HANG = 2.1;
+const DASH = { speed: 25, time: 0.16, cooldown: 3, carry: 10.5 }; // Q: a short burst in the direction you are moving
 
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
 
@@ -32,6 +33,7 @@ export class Player {
     this.grounded = false; this.sliding = false; this.crouching = false;
     this.state = 'normal'; this.coyote = 0; this.jumpBuffer = 0; this.slideCd = 0; this.mantleCd = 0; this.padCd = 0;
     this.eye = STAND - 0.15; this.stepSmooth = 0; this.dip = 0; this.dipV = 0; this.bob = 0; this.roll = 0; this.strafeLean = 0; this.leanV = 0;
+    this.dashCd = 0; this.dashT = 0; this.dashMax = DASH.cooldown; this.dashX = 0; this.dashZ = 0;
     this.landGrace = 0; this.sprintT = 0; this.cutJump = false; this.mExit = 4.5;
     this.prompt = '';
     this.hp = this.maxHp; this.alive = true; this.hurtT = 99;
@@ -238,6 +240,18 @@ export class Player {
       if (after > before) { v.x *= before / after; v.z *= before / after; }
     }
 
+    // dash: a burst along your movement keys (or straight ahead), on the ground or in the air, then a cooldown
+    this.dashCd -= dt;
+    if (inp.pressed.has('KeyQ') && this.dashCd <= 0) {
+      this.dashX = wx || wz ? wx : fx; this.dashZ = wx || wz ? wz : fz;
+      this.dashT = DASH.time; this.dashCd = DASH.cooldown; this.sliding = false;
+      this.emit('dash', { x: this.dashX, z: this.dashZ, side: this.dashX * -fz + this.dashZ * fx });
+    }
+    if (this.dashT > 0) {
+      this.dashT -= dt; v.x = this.dashX * DASH.speed; v.z = this.dashZ * DASH.speed; if (v.y < 0) v.y = 0;
+      if (this.dashT <= 0) { v.x = this.dashX * DASH.carry; v.z = this.dashZ * DASH.carry; this.landGrace = 0.16; } // you come out of it still moving fast
+    }
+
     if (this.jumpBuffer > 0 && (this.grounded || this.coyote > 0)) {
       const hop = this.sliding; // jumping out of a slide is a long, low hop that carries the slide's speed
       v.y = hop ? JUMP * 0.86 : JUMP; this.grounded = false; this.coyote = 0; this.jumpBuffer = 0; jumped = true; this.cutJump = !hop; this.emit('jump', {});
@@ -245,7 +259,7 @@ export class Player {
     }
     if (this.cutJump && v.y > 0 && !inp.down('Space')) v.y -= GRAVITY * 1.4 * dt; // tap for a short hop, hold for full height
     if (v.y <= 0 || this.grounded && !jumped) this.cutJump = false;
-    v.y -= GRAVITY * dt; if (v.y < -55) v.y = -55;
+    if (!(this.dashT > 0)) v.y -= GRAVITY * dt; if (v.y < -55) v.y = -55;
 
     // body height (only stand up if there is headroom)
     const wantH = this.crouching ? CROUCH : STAND;
