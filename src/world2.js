@@ -388,7 +388,7 @@ export function createWorld(scene, renderer) {
     };
     wallSide(true, -IW, [[0, 6, 'gate'], [-28, 4.5, 'gate'], [16.5, 1.7, 'breach']]);   // north
     wallSide(true, IW, [[0, 6, 'gate'], [28, 4.5, 'gate'], [-36, 1.7, 'breach']]);     // south
-    wallSide(false, -IW, [[0, 6, 'gate'], [24, 4.5, 'gate'], [-30, 1.7, 'breach']]);   // west
+    wallSide(false, -IW, [[0, 6, 'gate'], [24, 4.5, 'gate'], [-42, 1.7, 'breach']]);   // west
     wallSide(false, IW, [[0, 6, 'gate'], [-24, 4.5, 'gate'], [30, 1.7, 'breach']]);    // east
 
     // ---- roads -------------------------------------------------------------------------------------------
@@ -417,7 +417,7 @@ export function createWorld(scene, renderer) {
     // ---- NORTH: Freight Row --------------------------------------------------------------------------------
     { // the yards: rows of containers west of the road, with lanes between them and gaps to cut through
       const MATS = [M.rust, M.navy, M.rust, M.cream, M.rust, M.teal];
-      [-97, -87, -77, -67].forEach((z, r) => { let i = 0; for (let x = -76; x <= -14; x += 8.6, i++) { if ((i * 3 + r * 5) % 7 === 0 || (i * 3 + r * 5) % 7 === 3) continue; cont(x, z, true, MATS[(i + r) % 6], (i + r) % 3 === 0 ? MATS[(i + r + 2) % 6] : null); } });
+      [-97, -87, -77, -67].forEach((z, r) => { let i = 0; for (let x = -76; x <= -14; x += 8.6, i++) { if ((i * 3 + r * 5) % 7 === 0 || (i * 3 + r * 5) % 7 === 3 || Math.hypot(x + 50, z + 103) < 17) continue; cont(x, z, true, MATS[(i + r) % 6], (i + r) % 3 === 0 ? MATS[(i + r + 2) % 6] : null); } });
     }
     outpost(-92, -92, 12, 10, 2, 'signal', M.rust);
     outpost(92, -92, 12, 10, 2, 'watch', M.navy, 'endX');
@@ -467,7 +467,7 @@ export function createWorld(scene, renderer) {
     cont(52, 60, false, M.cream); cont(56, 60, false, M.rust, M.cream); cont(20, 58, true, M.navy); cont(60, 84, true, M.cream, M.teal);
     for (let i = 0; i < 4; i++) barrier(14 + i * 6, 92, i % 2 === 0); // a vehicle park
     checkpoint(0, 76, false);
-    for (const [x, z, r] of [[16, 62, 0], [70, 96, 1], [86, 62, 2], [-10, 62, 3], [-58, 84, 0], [-60, 50, 1], [-12, 96, 2], [-8, 84, 3]]) cluster(x, z, r);
+    for (const [x, z, r] of [[86, 62, 2], [-58, 84, 0], [-60, 50, 1], [-12, 96, 2], [-8, 84, 3]]) cluster(x, z, r);
     building(90, 90, 12, 10, 1, M.cream, 'corner'); outbuildings.push(buildings.pop()); // a shed by the corner exit
 
     // ---- WEST: the Works -------------------------------------------------------------------------------------
@@ -475,9 +475,61 @@ export function createWorld(scene, renderer) {
     warehouse(-80, 28, 26, 18);
     outpost(-92, 92, 12, 10, 2, 'armoury', M.amber);
     checkpoint(-76, 0, true);
-    slab(-55, -40, false, 12, 2.6); // screens the walk from the tower to the breach
+    { // the quiet way: a walled lane from the west edge, past the foot of the tower, to the breach
+      for (const z of [-44.9, -39.1]) for (const [x0, x1] of [[-100, -76], [-76, -52]]) addBox((x0 + x1) / 2, 0, z, x1 - x0, 3.2, 0.4, M.concrete, { tag: 'wall', destructible: true });
+      addBox(-80, 3.2, -42, 18, 0.3, 6.2, M.slab, { tag: 'slab', destructible: true }); block(-92, -43.6); block(-62, -40.4);
+    }
     for (let i = 0; i < 5; i++) addBox(-60 - i * 2.6, 0, 52 + (i % 2) * 2.2, 2.4, 1.0 + i * 0.9, 2.4, i % 2 ? M.amber : M.concreteDark, cover); // stepped stacks: a climb onto the warehouse side
-    for (const [x, z, r] of [[-58, -10, 0], [-98, -8, 1], [-60, 12, 2], [-98, 12, 3], [-58, -58, 0], [-98, -52, 1], [-62, 46, 2], [-100, 56, 3], [-60, 78, 0]]) cluster(x, z, r);
+    for (const [x, z, r] of [[-98, 14, 3], [-58, -58, 0], [-98, -52, 1], [-62, 46, 2], [-100, 56, 3], [-60, 78, 0]]) cluster(x, z, r);
+
+    // ---- HEIGHT ------------------------------------------------------------------------------------------
+    // The rampart: a walkway along the inside of the inner wall, all the way round, with a parapet facing out.
+    // High ground over every approach and over the core's streets; stairs up beside each main gate, and no rail
+    // on the inner edge, so getting down is a drop.
+    {
+      const DY = WH, DW = 3, lenSide = IW * 2, piece = lenSide / 4;
+      for (const [alongX, sgn] of [[true, -1], [true, 1], [false, -1], [false, 1]]) for (let k = 0; k < 4; k++) {
+        const c = -IW + piece * (k + 0.5), f = sgn * IW, inner = sgn * (IW - 0.2 - DW / 2);
+        if (alongX) { addBox(c, DY - 0.3, inner, piece, 0.3, DW, M.slab, { tag: 'slab', destructible: true }); addBox(c, DY, f, piece, 1.1, 0.4, M.concrete, cover); }
+        else { addBox(inner, DY - 0.3, c, DW, 0.3, piece, M.slab, { tag: 'slab', destructible: true }); addBox(f, DY, c, 0.4, 1.1, piece, M.concrete, cover); }
+      }
+      const n = Math.ceil(DY / 0.3), run = 0.55, edge = IW - 0.2 - DW; // steps rise along the wall and finish level with the walkway
+      for (const [alongX, sgn, from, dir] of [[true, -1, 6, 1], [true, 1, -6, -1], [false, -1, -6, -1], [false, 1, 6, 1]]) for (let st = 0; st < n; st++) {
+        const a = from + dir * run * (st + 0.5), b = sgn * (edge - 1), h = (DY / n) * (st + 1);
+        if (alongX) addBox(a, 0, b, run, h, 2, M.concreteDark, { tag: 'stair' }); else addBox(b, 0, a, 2, h, run, M.concreteDark, { tag: 'stair' });
+      }
+    }
+    // Footbridges over the roads: a deck at first-floor height with steps up. They break the long view down the road
+    // and give whoever holds one a commanding position over the checkpoint.
+    const footbridge = (x, z, alongX, stairsBoth) => { // the deck runs across the road
+      const H = 3.6, half = 8, n = 12, run = 0.55;
+      if (alongX) addBox(x, H - 0.3, z, half * 2, 0.3, 3, M.slab, { tag: 'slab', destructible: true }); else addBox(x, H - 0.3, z, 3, 0.3, half * 2, M.slab, { tag: 'slab', destructible: true });
+      for (const sd of [-1, 1]) { if (alongX) addBox(x, H, z + sd * 1.4, half * 2, 1.0, 0.2, M.concreteDark, cover); else addBox(x + sd * 1.4, H, z, 0.2, 1.0, half * 2, M.concreteDark, cover); }
+      for (const sd of stairsBoth ? [-1, 1] : [-1]) for (let st = 0; st < n; st++) {
+        const a = sd * (half + run * (n - st - 0.5)), h = (H / n) * (st + 1);
+        if (alongX) addBox(x + a, 0, z, run, h, 3, M.concreteDark, { tag: 'stair' }); else addBox(x, 0, z + a, 3, h, run, M.concreteDark, { tag: 'stair' });
+      }
+      for (const sd of [-1, 1]) { const px = alongX ? x + sd * 5 : x, pz = alongX ? z : z + sd * 5; addBox(px, 0, pz, 0.6, H - 0.3, 0.6, M.concreteDark, { tag: 'pillar' }); }
+    };
+    footbridge(0, -61, true, false);  // north: steps on the yard side only; the alley side is a drop
+    footbridge(0, 62, true, true);    // south
+    footbridge(-62, 0, false, true);  // west
+
+    // ---- SKYLINE: one tall thing per side, so a glance tells you which district you are looking at -----------------
+    for (const x of [-82, -11]) addBox(x, 0, -82, 1.6, 19, 1.6, M.amber, { tag: 'post' });                    // north: a gantry crane over the yard
+    addBox(-46.5, 19, -82, 73, 1.6, 2.4, M.amber, { solid: false }); addBox(-40, 14.5, -82, 3, 4.5, 3, M.concreteDark, { solid: false, shadow: false });
+    for (const x of [58, 66, 74]) { addBox(x, 0, 97, 6, 17, 6, M.cream, { tag: 'bunker' }); addBox(x, 17, 97, 6.4, 0.5, 6.4, M.concreteDark, { solid: false }); } // south: grain silos
+    addBox(-99, 0, -10, 3.2, 34, 3.2, M.concreteDark, { tag: 'bunker' });                                    // west: the works chimney
+    for (const y of [10, 20, 30]) addBox(-99, y, -10, 3.5, 1.2, 3.5, M.amber, { solid: false, shadow: false });
+    addBox(-99, 34, -10, 3.6, 0.6, 3.6, M.glowAmber, { solid: false, shadow: false });
+
+    // ---- ARRIVAL: each way in starts under an arch in its district's colour, facing the centre ------------------
+    for (const [sx, sz] of spawnPoints) {
+      const ns = Math.abs(sz) > Math.abs(sx), mat = ns ? (sz < 0 ? M.rust : M.cream) : (sx < 0 ? M.amber : M.navy);
+      const ax = ns ? sx : sx - Math.sign(sx) * 7, az = ns ? sz - Math.sign(sz) * 7 : sz;
+      for (const sd of [-1, 1]) { const px = ns ? ax + sd * 2.6 : ax, pz = ns ? az : az + sd * 2.6; if (!blocked(px - 0.5, px + 0.5, pz - 0.5, pz + 0.5, 0.1)) addBox(px, 0, pz, 0.9, 4.4, 0.9, mat, { tag: 'post' }); }
+      addBox(ax, 4.4, az, ns ? 6.1 : 0.9, 0.8, ns ? 0.9 : 6.1, mat, { solid: false });
+    }
 
   }
 
