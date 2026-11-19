@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { materials, Kit, rbox, tube, pin, lathe, profile, section, ngon, roundRect, rail, screw, sub, offset, buildHand, squeeze, marking } from './vmkit.js';
 import { redDotLens, scopeLens } from './optics.js';
 import { clamp01, seg, ease, eseg, bump, finish, WRAP_CURLS, GRIP_THUMB, gripHand, cupHand, GRIP_PTS, shiftPts, TRIGGER } from './vmcommon.js';
-import { buildHandcannon, buildLmg, buildLever, buildCrossbow } from './viewmodels2.js';
+import { buildHandcannon, buildLmg, buildLever, buildCrossbow, buildBurstRifle, buildBurstPistol } from './viewmodels2.js';
 
 // First-person weapon models (procedural). Gun space: +x right, +y up, forward is -z; helpers take (x, y, f).
 // Each builder returns:
@@ -554,7 +554,8 @@ function buildPistol() {
 }
 
 const BUILDERS = { pistol: buildPistol, rifle: buildRifle, shotgun: buildShotgun, sniper: buildSniper, launcher: buildLauncher,
-  handcannon: buildHandcannon, lmg: buildLmg, lever: buildLever, crossbow: buildCrossbow };
+  handcannon: buildHandcannon, lmg: buildLmg, lever: buildLever, crossbow: buildCrossbow,
+  burst_rifle: buildBurstRifle, burst_pistol: buildBurstPistol };
 // variants reuse a model with a different finish (materials are cloned so the original gun keeps its colours)
 const MODEL_FOR = { smg: ['rifle', [1.5, 1.28, 0.85]], dmr: ['rifle', [0.82, 1.12, 0.72]], slug_shotgun: ['shotgun', [1.2, 0.72, 0.78]] };
 // Every viewmodel comes back with `body` (hidden while the eye is at a telescopic sight) inside `group`,

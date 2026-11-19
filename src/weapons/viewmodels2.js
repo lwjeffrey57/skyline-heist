@@ -448,3 +448,188 @@ export function buildCrossbow() {
     },
   };
 }
+
+// =============================================================================
+// PETREL B3 — bullpup burst rifle: one-piece shell, magazine behind the grip, an open bridge rail over the top
+// =============================================================================
+export function buildBurstRifle() {
+  const M = materials(); const group = new THREE.Group(); const K = new Kit();
+  const BY = 0.046, RY = 0.109, SY = RY + 0.0062 + 0.0225;
+  // shell: butt, cheek, action cover, fore-end in one moulding
+  K.add(profile([[-0.33, -0.05], [-0.33, 0.06], [-0.31, 0.075], [0.02, 0.075], [0.06, 0.066], [0.25, 0.066], [0.27, 0.05], [0.27, 0.012], [0.2, -0.006], [0.05, -0.02], [-0.03, -0.02], [-0.04, -0.034], [-0.095, -0.034], [-0.11, -0.02], [-0.16, -0.02], [-0.18, -0.05]], 0.046, 0.007), M.cerakote);
+  K.add(rbox(0.048, 0.118, 0.012, 0.004), M.rubber, 0, 0.006, -0.336);
+  K.add(rbox(0.047, 0.006, 0.12, 0.002), M.rubber, 0, 0.077, -0.22); // cheek pad
+  for (let i = 0; i < 5; i++) for (const s of [-1, 1]) K.add(rbox(0.001, 0.02, 0.012, 0.0003, 1), M.black, s * 0.0232, 0.036, 0.1 + i * 0.03, 0, 0, 0.0);
+  K.add(rbox(0.001, 0.014, 0.07, 0.0003, 1), M.black, -0.0232, 0.05, 0.02);  // charging slot (left)
+  K.add(rbox(0.001, 0.018, 0.06, 0.0003, 1), M.black, 0.0232, 0.05, -0.2);  // ejection port (right, by the cheek)
+  screw(K, M, -0.0232, 0.02, -0.14, 0.003); screw(K, M, -0.0232, 0.03, -0.29, 0.003); screw(K, M, -0.0232, 0.02, 0.22, 0.003);
+  K.add(rbox(0.03, 0.03, 0.07, 0.004), M.poly, 0, -0.044, -0.222); // magazine well collar
+  // bridge rail: two raked posts and a bar, open underneath
+  for (const [f0, f1] of [[-0.13, -0.085], [0.14, 0.19]]) K.add(profile([[f0, 0.07], [f1, 0.07], [f1 - 0.008, RY], [f0 + 0.008, RY]], 0.018, 0.004), M.anod);
+  K.add(rbox(0.02, 0.009, 0.33, 0.003), M.anod, 0, RY - 0.0035, 0.03);
+  rail(K, M.anod, RY, -0.13, 0.19);
+  // barrel and a three-prong flash hider
+  K.add(lathe([[0.0125, 0.26], [0.0125, 0.29], [0.009, 0.294], [0.009, 0.4]], 14), M.steel, 0, BY, 0);
+  K.add(lathe([[0.009, 0.396], [0.0122, 0.4], [0.0122, 0.44], [0.0105, 0.442], [0.0058, 0.442], [0.0058, 0.41]], 14), M.steel, 0, BY, 0);
+  for (let i = 0; i < 3; i++) { const a = i * Math.PI * 2 / 3 + Math.PI / 2; K.add(rbox(0.004, 0.0018, 0.028, 0.0005, 1), M.black, Math.cos(a) * 0.0118, BY + Math.sin(a) * 0.0118, 0.424, 0, 0, a + Math.PI / 2); }
+  const muzzle = sub(group, 0, BY, 0.444);
+  const eject = sub(group, 0.03, 0.05, -0.2);
+  // grip, long guard, trigger, hand stop
+  K.add(profile(GRIP_PTS, 0.032, 0.009), M.grip);
+  K.add(rbox(0.014, 0.0035, 0.08, 0.001), M.anod, 0, -0.062, 0.003);
+  K.add(rbox(0.014, 0.036, 0.0035, 0.001), M.anod, 0, -0.046, 0.043, 0.3);
+  K.add(profile(TRIGGER, 0.006, 0.0012), M.steel, 0, 0, 0.004);
+  K.add(profile([[0.2, -0.004], [0.262, 0.01], [0.258, -0.03], [0.24, -0.036]], 0.03, 0.006), M.poly);
+  K.build(group);
+  { const mk = marking(['PETREL B3', '5.7x33   TESSEL ARMORY   PB-90114'], 0.08); mk.position.set(-0.0234, 0.05, 0.22); group.add(mk); }
+  { const mk = marking(['SAFE   3RD'], 0.028); mk.position.set(-0.0234, 0.012, 0.045); group.add(mk); }
+  // factory sights on the rail: rear aperture, front post with ears
+  const optDef = sub(group, 0, 0, 0);
+  { const k = new Kit(), y0 = RY + 0.0062;
+    for (const [f, post] of [[-0.1, false], [0.17, true]]) {
+      k.add(rbox(0.02, 0.006, 0.016, 0.002), M.anod, 0, y0 + 0.003, f);
+      for (const s of [-1, 1]) k.add(rbox(0.0022, 0.0245, 0.008, 0.0006), M.anod, s * 0.0078, y0 + 0.0155, f);
+      if (post) { k.add(rbox(0.002, 0.0165, 0.002, 0.0004, 1), M.steel, 0, y0 + 0.0143, f); k.add(rbox(0.0021, 0.002, 0.0004, 0.0001, 1), M.tritium, 0, SY - 0.0012, f - 0.0011); }
+      else { k.add(new THREE.TorusGeometry(0.0042, 0.0013, 8, 20), M.anod, 0, SY, f); k.add(rbox(0.0026, 0.012, 0.0026, 0.0004, 1), M.anod, 0, y0 + 0.012, f); }
+    }
+    k.build(optDef); }
+  // magazine (behind the grip), charging handle, bolt seen through the port
+  const mag = sub(group, 0, 0, 0);
+  { const k = new Kit();
+    k.add(profile([[-0.252, -0.03], [-0.192, -0.03], [-0.184, -0.158], [-0.244, -0.163]], 0.024, 0.003), M.steel);
+    for (let i = 0; i < 4; i++) k.add(rbox(0.0252, 0.003, 0.05, 0.001, 1), M.steel, 0, -0.07 - i * 0.022, -0.218 + i * 0.0014, 0.06);
+    k.add(rbox(0.028, 0.008, 0.066, 0.003), M.poly, 0, -0.163, -0.213, 0.07);
+    k.add(rbox(0.0285, 0.003, 0.03, 0.001), M.paintTeal, 0, -0.163, -0.213, 0.07);
+    k.build(mag); }
+  const chg = sub(group, 0, 0, 0);
+  { const k = new Kit(); k.add(pin(0.0045, 0.018, 10), M.bare, -0.031, 0.05, 0.045); k.add(rbox(0.004, 0.012, 0.014, 0.002), M.steel, -0.024, 0.05, 0.045); k.build(chg); }
+  const bolt = sub(group, 0, 0, 0);
+  { const k = new Kit(); k.add(rbox(0.002, 0.015, 0.05, 0.001), M.bare, 0.0228, 0.05, -0.195); k.build(bolt); }
+
+  const hr = gripHand(M, -0.044, -0.105); group.add(hr.group);
+  const hl = cupHand(M, 0.14, -0.013); group.add(hl.group);
+
+  finish(group);
+  return {
+    group, muzzle, eject, sight: [0, SY, -0.1], lens: null,
+    mounts: {
+      muzzle: { r: 0.0122 }, optic: { y: RY + 0.0062, f: 0.03, def: optDef },
+      mag: { group: mag, y: -0.163, f: -0.213, ang: 0.07, w: 0.028, d: 0.064 },
+      under: { y: -0.036, f: 0.248, small: true }, side: { x: -0.0245, y: 0.04, f: 0.225 },
+    },
+    animate(s, out) {
+      const rc = bump(s.cycle, 0, 0.05);
+      let cz = 0.05 * rc;
+      squeeze(hr.index, s.trigger);
+      let magY = 0, hx = 0, hy = 0, hf = 0;
+      if (s.rl) {
+        const t = s.rl.t, tac = !!s.rl.tac, end = s.rl.end || 1;
+        // the magazine is behind the hand: the muzzle goes up and the gun rolls to bring the well to the left hand
+        const tilt = eseg(t, 0, 0.13) * (1 - eseg(t, end - 0.16, end));
+        out.r.z -= 0.5 * tilt; out.r.x += 0.34 * tilt; out.p.y += 0.05 * tilt; out.p.x -= 0.03 * tilt; out.p.z -= 0.05 * tilt;
+        const o = eseg(t, 0.1, 0.24), i = eseg(t, 0.42, 0.6);
+        magY = -0.42 * (o - i);
+        const strip = bump(t, 0.1, 0.24); out.p.y -= 0.02 * strip; out.r.z -= 0.05 * strip;
+        const seat = bump(t, 0.57, 0.68); out.p.y += 0.024 * seat; out.r.x -= 0.05 * seat; out.r.z += 0.04 * seat;
+        const ch = tac ? 0 : bump(t, 0.7, 0.86), rel = tac ? 0 : bump(t, 0.8, 0.9);
+        cz = 0.07 * ch; out.p.z += 0.022 * ch - 0.012 * rel; out.r.z += 0.12 * ch;
+        if (t < 0.64) { const k = eseg(t, 0.02, 0.1) * (1 - eseg(t, 0.6, 0.66)); hf = -0.36 * k; hy = magY * 0.9 - 0.06 * k; hx = 0.04 * k; }
+        else if (!tac) { const k = eseg(t, 0.66, 0.72) * (1 - eseg(t, 0.86, 0.96)); hx = 0.0; hy = 0.07 * k; hf = -0.08 * k - 0.07 * ch; }
+      }
+      chg.position.z = cz; bolt.position.z = cz * 0.8;
+      mag.position.y = magY; mag.visible = magY > -0.4;
+      offset(hl.group, hx, hy, hf);
+    },
+  };
+}
+
+// =============================================================================
+// SISKIN-18 — burst machine pistol: ported slide, long magazine, a stub foregrip folded down under the frame
+// =============================================================================
+export function buildBurstPistol() {
+  const M = materials(); const group = new THREE.Group(); const K = new Kit();
+  const BY = 0.032, TOP = 0.05, SY = 0.057;
+  // frame: long railed dust cover, guard, grip
+  K.add(profile([[-0.022, -0.004], [0.15, -0.004], [0.15, 0.014], [-0.078, 0.014], [-0.09, 0.009], [-0.084, -0.02], [-0.106, -0.114], [-0.1, -0.122], [-0.056, -0.122], [-0.04, -0.05], [-0.034, -0.03]], 0.028, 0.005), M.cerakote);
+  K.add(profile([[-0.036, -0.004], [0.06, -0.004], [0.062, -0.012], [0.054, -0.046], [-0.03, -0.05], [-0.04, -0.04]], 0.013, 0.002,
+    [[[-0.028, -0.044], [0.048, -0.041], [0.053, -0.009], [-0.03, -0.009]]]), M.cerakote);
+  K.add(profile([[-0.086, -0.03], [-0.1, -0.105], [-0.062, -0.105], [-0.046, -0.05], [-0.05, -0.03]], 0.0295, 0.004), M.grip);
+  K.add(profile(TRIGGER, 0.006, 0.0012), M.steel, 0, 0.012, 0.014);
+  K.add(rbox(0.003, 0.006, 0.026, 0.001), M.steel, -0.0147, 0.008, -0.03);            // selector
+  K.add(pin(0.0014, 0.0006, 8), M.paintWhite, -0.0146, 0.002, -0.05);
+  for (let i = 0; i < 3; i++) K.add(pin(0.0012, 0.0006, 8), M.paintRed, -0.0146, 0.002, -0.006 - i * 0.005); // three dots: burst
+  screw(K, M, -0.0142, 0.004, 0.04, 0.0018); screw(K, M, -0.0142, 0.004, -0.066, 0.0018);
+  // barrel with a fixed compensator block ahead of the slide
+  K.add(lathe([[0.0001, -0.02], [0.0068, -0.02], [0.0068, 0.15]], 14), M.bare, 0, BY, 0);
+  K.add(section(roundRect(0.026, 0.03, 0.006, 3), 0.15, 0.178, [0.0048]), M.steel, 0, BY + 0.002, 0);
+  for (let i = 0; i < 2; i++) K.add(rbox(0.014, 0.0016, 0.007, 0.0004, 1), M.black, 0, BY + 0.0171, 0.158 + i * 0.011);
+  // stub foregrip, folded down, on a hinge under the dust cover
+  K.add(profile([[0.07, -0.004], [0.112, -0.004], [0.108, -0.074], [0.1, -0.082], [0.084, -0.082], [0.076, -0.074]], 0.023, 0.008), M.grip);
+  K.add(pin(0.004, 0.03, 10), M.steel, 0, -0.008, 0.091);
+  K.build(group);
+  const muzzle = sub(group, 0, BY, 0.18);
+  const eject = sub(group, 0.018, 0.046, 0.02);
+
+  // slide: flat-sided with lightening cuts, open top port, sights
+  const slide = sub(group, 0, 0, 0);
+  { const k = new Kit();
+    k.add(profile([[-0.082, 0.0145], [-0.082, TOP - 0.004], [-0.078, TOP], [0.143, TOP], [0.148, TOP - 0.005], [0.148, 0.0145]], 0.027, 0.003, [], 2), M.steel);
+    for (const s of [-1, 1]) {
+      for (let i = 0; i < 6; i++) k.add(rbox(0.0008, 0.022, 0.0026, 0.0003, 1), M.black, s * 0.0137, 0.033, -0.072 + i * 0.006, -0.3);
+      for (let i = 0; i < 3; i++) k.add(rbox(0.0008, 0.01, 0.022, 0.0003, 1), M.black, s * 0.0137, 0.036, 0.062 + i * 0.03);
+    }
+    k.add(rbox(0.014, 0.0012, 0.04, 0.0004, 1), M.black, 0.004, TOP + 0.0001, 0.02);
+    k.add(rbox(0.011, 0.0016, 0.024, 0.0004, 1), M.bare, 0.004, TOP - 0.0003, 0.024);
+    k.add(rbox(0.017, 0.026, 0.0012, 0.0004, 1), M.black, 0, 0.033, -0.0822);
+    k.add(rbox(0.022, 0.0022, 0.012, 0.001), M.steel, 0, TOP + 0.001, -0.066);
+    for (const s of [-1, 1]) { k.add(rbox(0.0042, 0.0045, 0.009, 0.0007), M.steel, s * 0.0088, SY - 0.0022, -0.066); k.add(new THREE.CircleGeometry(0.0008, 10), M.tritium, s * 0.0088, SY - 0.002, -0.0706); }
+    k.add(profile([[0.126, TOP], [0.14, TOP], [0.138, SY], [0.1305, SY]], 0.0024, 0.0004), M.steel);
+    k.add(new THREE.CircleGeometry(0.00105, 12), M.tritium, 0, SY - 0.0014, 0.1302);
+    k.build(slide);
+    const mk = marking(['SISKIN-18', '9x19  3RD   TESSEL ARMORY   SK-18402'], 0.062); mk.position.set(-0.01365, 0.022, -0.0); slide.add(mk); }
+
+  // long magazine: sticks well out of the grip
+  const mag = sub(group, 0, 0, 0);
+  { const k = new Kit();
+    k.add(profile([[-0.08, -0.02], [-0.1135, -0.17], [-0.0755, -0.17], [-0.046, -0.02]], 0.02, 0.002), M.steel);
+    for (let i = 0; i < 4; i++) k.add(pin(0.0016, 0.0206, 8), M.black, 0, -0.132 - i * 0.009, -0.086 - i * 0.002);
+    k.add(profile([[-0.121, -0.171], [-0.118, -0.183], [-0.068, -0.183], [-0.066, -0.171]], 0.029, 0.003), M.poly);
+    k.build(mag); }
+
+  const hr = gripHand(M, -0.034, -0.088, { thumb: { dir: [-0.5, 0.2, -0.84], bend: [-0.5, -0.3, 0.2], angle: 0.16 } }); group.add(hr.group);
+  const hl = buildHand(M, { right: false, pos: [-0.034, -0.066, 0.078 - 0.096], fwd: [0.1, 0.25, 0.95], palm: [1, 0, -0.1], elbow: [-0.34, -0.4, -0.85], curls: WRAP_CURLS, thumb: { dir: [-0.62, 0.5, -0.6], bend: [-0.7, -0.6, 0.2], angle: 0.42 } });
+  group.add(hl.group);
+
+  finish(group);
+  let wasEmpty = false;
+  return {
+    group, muzzle, eject, sight: [0, SY, -0.066], lens: null,
+    mounts: {
+      muzzle: { r: 0.009, small: true }, optic: { y: TOP, f: -0.03, parent: slide, scale: 0.72 },
+      mag: { group: mag, y: -0.183, f: -0.094, ang: -0.22, w: 0.027, d: 0.05, pistol: true },
+    },
+    animate(s, out) {
+      squeeze(hr.index, s.trigger);
+      let sz = 0.04 * bump(s.cycle, 0, 0.05);
+      if (s.mag === 0 && !s.rl && s.cycle > 0.025) sz = 0.036;
+      let magD = 0, lx = 0, ly = 0, lf = 0;
+      if (s.rl) {
+        const t = s.rl.t, end = s.rl.end || 1;
+        if (t < 0.05) wasEmpty = s.mag === 0;
+        const tilt = eseg(t, 0, 0.14) * (1 - eseg(t, end - 0.18, end));
+        out.r.z -= 0.5 * tilt; out.r.x += 0.3 * tilt; out.p.y += 0.04 * tilt; out.p.x -= 0.02 * tilt;
+        const o = eseg(t, 0.08, 0.22), i = eseg(t, 0.36, 0.55);
+        magD = o - i;
+        out.p.y -= 0.012 * bump(t, 0.08, 0.2);
+        const seat = bump(t, 0.51, 0.63); out.p.y += 0.028 * seat; out.r.x -= 0.07 * seat;
+        if (wasEmpty && !s.rl.tac) { sz = 0.036 * (1 - eseg(t, 0.72, 0.76)); const rel = bump(t, 0.72, 0.84); out.r.x -= 0.06 * rel; out.p.z -= 0.012 * rel; out.r.z += 0.05 * rel; }
+        // the left hand lets go of the foregrip, brings the magazine up into the grip, and comes back
+        const k = eseg(t, 0.03, 0.12) * (1 - eseg(t, 0.62, 0.76));
+        lx = -0.01 * k; ly = -0.4 * magD - 0.07 * k; lf = -0.1 * magD - 0.13 * k;
+      }
+      slide.position.z = sz;
+      mag.position.set(0, -0.42 * magD, 0.09 * magD); mag.visible = magD < 0.97;
+      offset(hl.group, lx, ly, lf);
+    },
+  };
+}

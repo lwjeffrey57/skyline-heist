@@ -230,6 +230,40 @@ WEAPONS.push(
   },
 );
 
+// ---- burst guns: one click = three rounds. `modes: ['burst']`, burst: { count, rpm (inside the burst), gap (pause after it) } ----
+// A click during a burst or its pause queues exactly one more burst; a burst always completes; reload / swap wait for it.
+WEAPONS.push(
+  { // bullpup: a tight triple at mid range. One burst to the body leaves a guard standing, two (or one with a head hit) do not.
+    id: 'burst_rifle', name: 'PETREL B3', tag: 'Bullpup burst rifle', accent: '#5fd0ff',
+    modes: ['burst'], rpm: 410, burst: { count: 3, rpm: 1000, gap: 0.26 },
+    damage: 34, headMult: 1.6, headR: 0.24, falloff: [40, 90, 0.7], pellets: 1, range: 450,
+    mag: 30, reserve: 180, killRefund: 30,
+    reload: { type: 'mag', time: 1.9, commit: 0.6, tactical: 0.8, stages: [0.12, 0.6, 0.74] },
+    equip: 0.26, sprintOut: 0.11, mobility: 0.99,
+    spread: { hip: 0.5, ads: 0.0, move: 1.0, air: 1.8, slide: 0.6, bloom: 0.34, bloomMax: 2.4, decay: 9, delay: 0.3, crouch: 0.7, adsMoveMult: 0.2, adsBloom: 0.15 },
+    // rounds 1-3 barely move (the first burst lands together); spam it and bursts two and three climb and walk
+    recoil: { pattern: [[0.3, 0.02], [0.34, -0.03], [0.4, 0.03], [0.8, 0.14], [0.85, 0.16], [0.9, 0.12], [0.8, -0.2], [0.8, -0.24], [0.8, -0.16]], loop: 6, jitter: 0.04, adsMult: 0.72, crouchMult: 0.85, snap: 120, recover: 11, delay: 0.24 },
+    kick: { z: 0.036, rx: 0.03, roll: 0.024, jolt: 0.002, cam: 0.004, camRoll: 0.004, fov: 0.6, climb: 0.016, climbMax: 0.06 },
+    eject: { delay: 0.0, vel: [2.4, 1.2, -0.3] },
+    ads: { fov: 0.64, time: 0.17, move: 0.8, vmFov: 42 },
+    view: { hip: [0.2, -0.2, 0.36], fov: 60, adsDist: 0.19 },
+  },
+  { // machine pistol: three fast snaps a click. Wins a doorway, climbs off the target if you mash it, short reach.
+    id: 'burst_pistol', name: 'SISKIN-18', tag: 'Burst machine pistol', accent: '#ff9bb0',
+    modes: ['burst'], rpm: 490, burst: { count: 3, rpm: 1100, gap: 0.2 },
+    damage: 21, headMult: 1.8, headR: 0.24, falloff: [10, 28, 0.5], pellets: 1, range: 200,
+    mag: 18, reserve: 108, killRefund: 18,
+    reload: { type: 'mag', time: 1.45, commit: 0.55, tactical: 0.78, stages: [0.1, 0.55, 0.72] },
+    equip: 0.17, sprintOut: 0.07, mobility: 1.03,
+    spread: { hip: 0.6, ads: 0.15, move: 0.7, air: 1.4, slide: 0.5, bloom: 0.5, bloomMax: 3.0, decay: 9, delay: 0.26, crouch: 0.75, adsMoveMult: 0.3, adsBloom: 0.4 },
+    recoil: { pattern: [[0.9, 0.08], [1.1, -0.12], [1.3, 0.16], [1.7, 0.3], [1.9, -0.34], [2.1, 0.3], [2.0, -0.4], [2.2, 0.36], [2.2, -0.3]], loop: 6, jitter: 0.12, adsMult: 0.82, crouchMult: 0.85, snap: 120, recover: 13, delay: 0.2 },
+    kick: { z: 0.026, rx: 0.07, roll: 0.03, jolt: 0.0025, cam: 0.005, camRoll: 0.005, fov: 0.5, climb: 0.014, climbMax: 0.06 },
+    eject: { delay: 0.01, vel: [2.2, 1.9, 0.3] },
+    ads: { fov: 0.84, time: 0.12, move: 1.0, vmFov: 50 },
+    view: { hip: [0.115, -0.125, 0.36], fov: 60, adsDist: 0.37 },
+  },
+);
+
 // Bouncing explosives. Blast damage falls off linearly from `damage` at the centre to damage*edge at `radius`.
 export const PROJECTILES = {
   launcher: {

@@ -103,6 +103,26 @@ Object.assign(D, {
   stinger: { gain: 0.6, max: 1, gap: 1, send: 0, rate: 0, pr: 9 },
   drone_loop: { gain: 0, max: 0, gap: 9, send: 0, rate: 0, pr: 0 }, tension: { gain: 0, max: 0, gap: 9, send: 0, rate: 0, pr: 0 }, // loops (ambient.js owns their nodes)
 });
+// Own voices for the later guns (player's shots only). Each re-uses an existing buffer set - the recorded takes where
+// there are any - re-pitched (rate) and re-levelled (vol), with its own low-end and action layers (synth.js: cock,
+// belt, lever, xbow, whistle). pistol: play the recorded pistol takes. sub: [sound, vol]. layer: [sound, vol, delay,
+// only on sustained fire]. after: [sound, vol, delay, rate] replaces the class's bolt / pump cue. cycle: the sound of a
+// hand-worked action (reloadStage { cycle:true }). silent: no gunshot at all, just [sound, vol] and extra [sound, vol, delay].
+const VOICE = {
+  handcannon: { pistol: true, rate: 0.66, vol: 1.3, sub: ['sub_heavy', 0.85], after: ['cock', 1, 0.34, 1], tail: 1.3 },
+  lmg: { rate: 0.84, vol: 1.05, sub: ['sub_rifle', 1.25], layer: ['belt', 1, 0.02, true], mechRate: 0.85 },
+  lever: { rate: 1.1, vol: 1.1, sub: ['sub_rifle', 0.8], noMech: true, cycle: 'lever' },
+  crossbow: { silent: ['xbow', 1], extra: ['whistle', 1, 0.03] },
+  burst_rifle: { rate: 1.14, vol: 0.95, sub: ['sub_rifle', 0.7], send: 0.75, mechRate: 1.12 },
+  burst_pistol: { pistol: true, rate: 1.2, vol: 0.85, sub: ['sub_rifle', 0.35], mechRate: 1.15 },
+};
+Object.assign(D, {
+  cock: { gain: 0.34, max: 1, gap: 0.05, send: 0.03, rate: 0.03, pr: 6 },
+  belt: { gain: 0.15, max: 3, gap: 0.03, send: 0.02, rate: 0.08, pr: 4 },
+  lever: { gain: 0.42, max: 1, gap: 0.1, send: 0.04, rate: 0.03, pr: 6 },
+  xbow: { gain: 0.6, max: 2, gap: 0.05, send: 0.12, rate: 0.03, pr: 9 },
+  whistle: { gain: 0.2, max: 2, gap: 0.05, send: 0.1, rate: 0.06, pr: 5 },
+});
 const ALIAS = { tail_out: 'rec_bot', step_bot: 'step' }; // voices that reuse another sound's buffers
 const N3D = 24, N2D = 16;
 const REV_OUT = 0.9, REV_IN = 3.6; // wet levels: open city / under a roof (calibrated numerically, see final report)
@@ -331,22 +351,28 @@ export function init(ctx) {
       // sustained automatic fire: later rounds sit a touch lower and drier so the burst stays punchy, not a wash
       const now = ac ? ac.currentTime : 0, rapid = now - lastOwn < 0.22;
       streak = rapid ? Math.min(streak + 1, 12) : 0; lastOwn = now;
-      const isPistol = e.weapon === 'pistol';
+      const V = VOICE[e.weapon];
+      if (V && V.silent) { // no powder: only its own sound
+        play2(V.silent[0], V.silent[1], 0.06); if (V.extra) play2(V.extra[0], V.extra[1], 0.1, 0, 1, V.extra[2]);
+        return;
+      }
+      const isPistol = e.weapon === 'pistol' || !!(V && V.pistol), vRate = V ? V.rate : 1, vVol = V ? V.vol : 1;
       const quiet = e.suppressed ? 0.3 : 1; // suppressed shots: much quieter, and no low-end layer
-      const key = isPistol && profile === 'R' && complete('rec_pistol') ? 'rec_pistol' : gunName(name), rec = !!REC[key], PF = rec ? REC_PF : PROFILES[synthProf()], auto = name === 'gun_rifle' && !isPistol;
+      const key = isPistol && profile === 'R' && complete('rec_pistol') ? 'rec_pistol' : gunName(name), rec = !!REC[key], PF = rec ? REC_PF : PROFILES[synthProf()], auto = name === 'gun_rifle' && !isPistol && !(V && V.noMech);
       // sustained fire: fade the previous round's long recorded buffer ~250 ms after it started, so voices never pile up
       if (rapid && ownV && ownV.busy && ownV.src === ownSrc) { ownV.g.gain.setTargetAtTime(0, now + 0.15, 0.03); try { ownSrc.stop(now + 0.32); } catch (err) { /* already stopped */ } }
       const la = lastRounds();
-      ownV = play2(key, quiet * (rapid ? 0.97 - Math.min(0.08, streak * 0.01) : 1.05) * (rec ? Math.pow(10, (Math.random() - 0.5) * 0.1) : 1), 0.06, rec ? 1 : 2 + Math.min(1, streak * 0.15), (1 + (!rec && streak > 3 ? (Math.random() - 0.5) * 0.03 : 0)) * (1 + la * 0.05), 0, PF.send * (rapid ? 0.7 : 1));
+      ownV = play2(key, vVol * quiet * (rapid ? 0.97 - Math.min(0.08, streak * 0.01) : 1.05) * (rec ? Math.pow(10, (Math.random() - 0.5) * 0.1) : 1), 0.06, rec ? 1 : 2 + Math.min(1, streak * 0.15), vRate * (1 + (!rec && streak > 3 ? (Math.random() - 0.5) * 0.03 : 0)) * (1 + la * 0.05), 0, PF.send * (rapid ? 0.7 : 1) * (V && V.send ? V.send : 1));
       ownSrc = ownV ? ownV.src : null;
-      if (e.suppressed) { /* no sub layer */ } else if (rec && key === 'rec_pistol') play2('sub_rifle', 0.55); else if (rec && key === 'rec_rifle') play2('sub_rifle', rapid ? 0.9 : 1); else if (rec && key === 'rec_shotgun') play2('sub_shotgun'); else if (rec && key === 'rec_heavy') play2('sub_heavy'); // low-end the close-mic recordings lack
+      if (e.suppressed) { /* no sub layer */ } else if (V && V.sub) { if (rec) play2(V.sub[0], V.sub[1]); } else if (rec && key === 'rec_pistol') play2('sub_rifle', 0.55); else if (rec && key === 'rec_rifle') play2('sub_rifle', rapid ? 0.9 : 1); else if (rec && key === 'rec_shotgun') play2('sub_shotgun'); else if (rec && key === 'rec_heavy') play2('sub_heavy'); // low-end the close-mic recordings lack
       // the action cycling, a few ms behind the blast; louder and higher as the magazine runs dry
-      if (!rec) { /* the synthesised voicings (F4: A/B/C) already contain their action */ } else if (isPistol) play2('mech_pistol', (e.suppressed ? 1.5 : 1) * (1 + la * 1.4), 0.1, 1.5, 1 + la * 0.1, 0.01);
-      else if (auto) play2('mech_rifle', (e.suppressed ? 1.5 : rapid ? 0.85 : 1) * (1 + la * 1.4), 0.1, 1.5, 1 + la * 0.1, 0.012);
+      if (!rec) { /* the synthesised voicings (F4: A/B/C) already contain their action */ } else if (isPistol) { if (!(V && V.after)) play2('mech_pistol', (e.suppressed ? 1.5 : 1) * (1 + la * 1.4), 0.1, 1.5, (1 + la * 0.1) * (V && V.mechRate ? V.mechRate : 1), 0.01); }
+      else if (auto) play2('mech_rifle', (e.suppressed ? 1.5 : rapid ? 0.85 : 1) * (1 + la * 1.4), 0.1, 1.5, (1 + la * 0.1) * (V && V.mechRate ? V.mechRate : 1), 0.012);
+      if (V && V.layer && (rapid || !V.layer[3])) play2(V.layer[0], V.layer[1], 0.1, 1.5, 1, V.layer[2]);
       // outdoors the shot comes back off the far buildings: a real distant report, late, dull and off to one side.
       // Under a roof there is none - the room response (revIn) is the tail.
       if (indoor !== 1 && !e.suppressed && name !== 'gun_grenade' && complete('tail_out')) {
-        const big = name === 'gun_heavy' ? 1.5 : name === 'gun_shotgun' ? 1.25 : isPistol ? 0.7 : 1;
+        const big = V && V.tail ? V.tail : name === 'gun_heavy' ? 1.5 : name === 'gun_shotgun' ? 1.25 : isPistol ? 0.7 : 1;
         const tv = play2('tail_out', big * (rapid ? 0.6 : 1), (Math.random() < 0.5 ? -1 : 1) * (0.25 + Math.random() * 0.5), 0, 0.76 + Math.random() * 0.1, 0.15 + Math.random() * 0.09, 1);
         if (tv) tv.sh.gain.value = -15;
       }
@@ -358,7 +384,8 @@ export function init(ctx) {
         else { tg.setTargetAtTime(0.5, now, 0.005); tg.setTargetAtTime(PF.roll > 1 ? 1.15 : 1, now + 0.03, 0.06); }
         md.cancelScheduledValues(now); md.setTargetAtTime(streak > 2 ? 0.55 : 0.8, now, 0.03); md.setTargetAtTime(1, now + 0.35, 0.3);
       }
-      if (name === 'gun_shotgun') play2('rl_bolt', 0.75, 0.1, 0, 0.82, 0.3);       // pump
+      if (V && V.after) play2(V.after[0], V.after[1], 0.1, 0, V.after[3], V.after[2]);
+      else if (name === 'gun_shotgun') play2('rl_bolt', 0.75, 0.1, 0, 0.82, 0.3);       // pump
       else if (name === 'gun_heavy') play2('rl_bolt', 0.8, 0.1, 0, 0.7, 0.42);     // bolt
       return;
     }
@@ -426,6 +453,7 @@ export function init(ctx) {
     state.rl_bolt.last = -1; play2('rl_bolt', 1, 0, 0, 1, Math.max(t * 0.52 + 0.15, t * 0.86 - 0.1));
   });
   events.on('reloadStage', (e) => {
+    if (e.cycle) { const V = VOICE[e.weapon]; if (V && V.cycle) { play2(V.cycle, 1, 0.08); return; } } // lever worked after a shot
     const first = !stagesSeen;
     if (first) { stagesSeen = true; cancel('rl_in'); cancel('rl_bolt'); } // drop whatever `reload` scheduled ahead
     const sg = gunFor(e.weapon) === 'gun_shotgun';
@@ -566,7 +594,7 @@ export function init(ctx) {
     get volume() { return volume; },
     // for tests / tooling
     debug: {
-      ready, buffers, defs: D, sounds: SOUNDS, gunFor, start, recStatus, gunName, REC,
+      ready, buffers, defs: D, sounds: SOUNDS, voices: VOICE, gunFor, start, recStatus, gunName, REC,
       get recReady() { return recReady; }, reloadRecs(map) { for (const k in map) buffers[k] = []; for (const k in ALIAS) buffers[k] = buffers[ALIAS[k]]; return loadRecs(map); },
       get context() { return ac; },
       get graph() { return G; },

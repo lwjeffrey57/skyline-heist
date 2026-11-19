@@ -37,28 +37,30 @@ export const SLOTS = {
   lmg: ['muzzle', 'optic', 'magazine', 'grip', 'stock'],
   lever: ['muzzle', 'optic', 'magazine'],
   crossbow: ['optic', 'grip', 'stock'],
+  burst_rifle: ['muzzle', 'optic', 'magazine', 'grip'],
+  burst_pistol: ['muzzle', 'optic', 'magazine'],
 };
 
 const RIFLES = ['rifle', 'smg', 'dmr'];
-const LONG = ['rifle', 'smg', 'dmr', 'lmg'];
+const LONG = ['rifle', 'smg', 'dmr', 'lmg', 'burst_rifle'];
 
 export const ATTACHMENTS = [
   // ---- muzzle -------------------------------------------------------------------------------------------------
   { id: 'suppressor', name: 'Hush can', short: 'SUP', slot: 'muzzle', part: 'suppressor', tier: 'rare', price: 900,
     desc: 'Guards hear your shots from a quarter of the distance. Less damage and reach, slower to aim.',
-    fits: ['pistol', 'rifle', 'smg', 'dmr', 'sniper', 'lmg', 'lever', 'shotgun', 'slug_shotgun'],
+    fits: ['pistol', 'rifle', 'smg', 'dmr', 'sniper', 'lmg', 'lever', 'shotgun', 'slug_shotgun', 'burst_rifle', 'burst_pistol'],
     mods: { suppressed: true, damage: 0.92, range: 0.85, adsTime: 1.06, recoilV: 0.95 } },
   { id: 'compensator', name: 'Compensator', short: 'COMP', slot: 'muzzle', part: 'compensator', tier: 'uncommon', price: 400,
     desc: 'A fifth less muzzle climb. The gun kicks sideways more and the blast is bigger.',
-    fits: ['pistol', 'rifle', 'smg', 'dmr', 'lmg', 'handcannon'],
+    fits: ['pistol', 'rifle', 'smg', 'dmr', 'lmg', 'handcannon', 'burst_rifle', 'burst_pistol'],
     mods: { recoilV: 0.78, recoilH: 1.2, loud: 1.25, kick: 1.1 } },
   { id: 'brake', name: 'Muzzle brake', short: 'BRK', slot: 'muzzle', part: 'brake', tier: 'uncommon', price: 400,
     desc: 'Sideways drift almost halved, so long sprays stay in a column. Looser from the hip.',
-    fits: ['rifle', 'smg', 'dmr', 'lmg', 'lever', 'shotgun', 'slug_shotgun'],
+    fits: ['rifle', 'smg', 'dmr', 'lmg', 'lever', 'shotgun', 'slug_shotgun', 'burst_rifle'],
     mods: { recoilH: 0.58, recoilV: 0.96, hipSpread: 1.2, loud: 1.15 } },
   { id: 'longbarrel', name: 'Long barrel', short: 'LONG', slot: 'muzzle', part: 'longbarrel', tier: 'uncommon', price: 450,
     desc: 'Damage holds 30% further out. Slower to aim, to raise and to carry.',
-    fits: ['rifle', 'smg', 'dmr', 'sniper', 'lmg', 'lever', 'shotgun', 'slug_shotgun', 'handcannon'],
+    fits: ['rifle', 'smg', 'dmr', 'sniper', 'lmg', 'lever', 'shotgun', 'slug_shotgun', 'handcannon', 'burst_rifle'],
     mods: { range: 1.3, adsTime: 1.12, equip: 1.15, mobility: 0.98, hipSpread: 1.1 } },
   // ---- optic --------------------------------------------------------------------------------------------------
   { id: 'irons', name: 'Flip-up irons', short: 'IRON', slot: 'optic', part: 'irons', tier: 'common', price: 150,
@@ -67,31 +69,31 @@ export const ATTACHMENTS = [
     mods: { adsTime: 0.84, adsMove: 1.08, optic: { kind: 'irons', fov: 0.82 } } },
   { id: 'reddot', name: 'Red dot', short: 'DOT', slot: 'optic', part: 'reddot', tier: 'common', price: 250,
     desc: 'A clean dot at 1.4x in place of the factory sights. A touch slower to aim than bare irons.',
-    fits: ['pistol', 'shotgun', 'slug_shotgun', 'handcannon', 'lmg', 'lever', 'crossbow'], // (the WREN family carries one from the factory)
+    fits: ['pistol', 'shotgun', 'slug_shotgun', 'handcannon', 'lmg', 'lever', 'crossbow', 'burst_rifle', 'burst_pistol'], // (the WREN family carries one from the factory)
     mods: { adsTime: 1.04, optic: { kind: 'dot', fov: 0.74, color: 0xff2a1a } },
     per: { pistol: { adsTime: 1.08, optic: { kind: 'dot', fov: 0.8, color: 0xff2a1a } }, handcannon: { adsTime: 1.08, optic: { kind: 'dot', fov: 0.78, color: 0xff2a1a } } } },
   { id: 'holo', name: 'Holo sight', short: 'HOLO', slot: 'optic', part: 'holo', tier: 'uncommon', price: 450,
     desc: 'Ring-and-dot reticle in a big window at 1.6x: easy to track with. Slower to aim, slower on the move.',
-    fits: ['rifle', 'smg', 'dmr', 'lmg', 'shotgun', 'slug_shotgun', 'crossbow'],
+    fits: ['rifle', 'smg', 'dmr', 'lmg', 'shotgun', 'slug_shotgun', 'crossbow', 'burst_rifle'],
     mods: { adsTime: 1.1, adsMove: 0.95, optic: { kind: 'holo', fov: 0.63, color: 0x45ffa0 } } },
   { id: 'scope25', name: '2.5x prism scope', short: '2.5X', slot: 'optic', part: 'scope25', tier: 'rare', price: 700,
     desc: 'Chevron reticle at 2.5x for work across the yard. A quarter slower to aim, clumsy up close.',
-    fits: ['rifle', 'smg', 'dmr', 'lmg', 'lever', 'crossbow', 'handcannon'],
+    fits: ['rifle', 'smg', 'dmr', 'lmg', 'lever', 'crossbow', 'handcannon', 'burst_rifle'],
     mods: { adsTime: 1.25, adsMove: 0.85, optic: { kind: 'scope', fov: 0.4, style: 1 } } },
   { id: 'scope4', name: '4x marksman scope', short: '4X', slot: 'optic', part: 'scope4', tier: 'epic', price: 1100,
     desc: 'A true 4x glass. Half as slow again to aim and you crawl while looking through it.',
-    fits: ['rifle', 'dmr', 'lmg', 'crossbow'],
+    fits: ['rifle', 'dmr', 'lmg', 'crossbow', 'burst_rifle'],
     mods: { adsTime: 1.5, adsMove: 0.7, optic: { kind: 'scope', fov: 0.25, style: 2 } } },
   // ---- magazine -----------------------------------------------------------------------------------------------
   { id: 'extmag', name: 'Extended magazine', short: 'EXT', slot: 'magazine', part: 'extmag', tier: 'uncommon', price: 450,
     desc: 'Half as many rounds again in the gun. Reloads 15% slower and the gun comes up slower.',
-    fits: ['pistol', 'rifle', 'smg', 'dmr', 'sniper', 'lmg', 'shotgun', 'slug_shotgun', 'lever'],
+    fits: ['pistol', 'rifle', 'smg', 'dmr', 'sniper', 'lmg', 'shotgun', 'slug_shotgun', 'lever', 'burst_rifle', 'burst_pistol'],
     mods: { mag: 1.5, reload: 1.15, adsTime: 1.05 },
     per: { shotgun: { magAdd: 2, adsTime: 1.06, equip: 1.1 }, slug_shotgun: { magAdd: 2, adsTime: 1.06, equip: 1.1 }, lever: { magAdd: 3, adsTime: 1.06, equip: 1.1 },
       sniper: { magAdd: 3, reload: 1.12, adsTime: 1.04 }, lmg: { mag: 1.5, reload: 1.12, mobility: 0.96 } } },
   { id: 'fastmag', name: 'Quick-pull magazine', short: 'FAST', slot: 'magazine', part: 'fastmag', tier: 'uncommon', price: 400,
     desc: 'Reloads a fifth faster. The bulky pull-tabs mean you carry 15% less spare ammunition.',
-    fits: ['pistol', 'rifle', 'smg', 'dmr', 'sniper'],
+    fits: ['pistol', 'rifle', 'smg', 'dmr', 'sniper', 'burst_rifle', 'burst_pistol'],
     mods: { reload: 0.8, reserve: 0.85 } },
   { id: 'drum', name: 'Drum magazine', short: 'DRUM', slot: 'magazine', part: 'drum', tier: 'epic', price: 1200,
     desc: 'Two and a half magazines in one. A long, heavy reload; slower to aim and to move.',
@@ -104,11 +106,11 @@ export const ATTACHMENTS = [
     mods: { recoilV: 0.82, recoilH: 0.92, adsTime: 1.07 } },
   { id: 'agrip', name: 'Angled grip', short: 'AGRP', slot: 'grip', part: 'agrip', tier: 'common', price: 250,
     desc: 'On target sooner: aims 18% faster and fires sooner out of a sprint. A little more sideways kick.',
-    fits: ['rifle', 'smg', 'dmr', 'lmg', 'crossbow'],
+    fits: ['rifle', 'smg', 'dmr', 'lmg', 'crossbow', 'burst_rifle'],
     mods: { adsTime: 0.82, sprintOut: 0.75, recoilH: 1.1 } },
   { id: 'laser', name: 'Aiming laser', short: 'LASR', slot: 'grip', part: 'laser', tier: 'uncommon', price: 350,
     desc: 'Hip fire 40% tighter, standing or moving. Takes the place of a grip.',
-    fits: ['pistol', 'rifle', 'smg', 'dmr', 'lmg', 'shotgun', 'slug_shotgun', 'handcannon', 'crossbow'],
+    fits: ['pistol', 'rifle', 'smg', 'dmr', 'lmg', 'shotgun', 'slug_shotgun', 'handcannon', 'crossbow', 'burst_rifle'],
     mods: { hipSpread: 0.6, moveSpread: 0.75 } },
   { id: 'brace', name: 'Brace pod', short: 'POD', slot: 'grip', part: 'brace', tier: 'rare', price: 650,
     desc: 'Crouch and the gun barely moves: recoil and spread nearly halved while crouched. Heavier everywhere else.',
@@ -156,6 +158,7 @@ export function effectiveDef(base, set, baseFov = 80) {
     mul(d, 'damage', m.damage); mul(d, 'rpm', m.rpm); mul(d, 'mobility', m.mobility); mul(d, 'equip', m.equip); mul(d, 'sprintOut', m.sprintOut);
     if (m.range != null) { d.falloff[0] *= m.range; d.falloff[1] *= m.range; }
     if (m.mag != null) d.mag = Math.max(1, Math.round(d.mag * m.mag));
+    if (m.mag != null && d.burst && d.modes.length === 1) d.mag = Math.ceil(d.mag / d.burst.count) * d.burst.count; // burst-only guns: whole bursts
     if (m.magAdd) d.mag += m.magAdd;
     if (m.reserve != null) d.reserve = Math.max(d.mag, Math.round(d.reserve * m.reserve));
     if (m.reload != null) for (const k of ['time', 'start', 'shell', 'end']) mul(r, k, m.reload);

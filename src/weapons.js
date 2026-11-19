@@ -6,6 +6,7 @@ import { createProjectiles } from './weapons/projectiles.js';
 import { createCasings } from './weapons/casings.js';
 import { ATTACHMENTS, SLOT_NAMES, attachment, slotsFor, fits, cleanSet, effectiveDef, summary } from './weapons/attachments.js';
 import { applyAttachments } from './weapons/attachparts.js';
+import { createBolts } from './weapons/bolts.js';
 
 // Weapons system: gun logic, first-person viewmodel + animation, recoil / camera feel, weapon HUD.
 // All tuning lives in ./weapons/defs.js. Contract: see core.js. Effects and sound are made by other
@@ -105,7 +106,7 @@ export function init(ctx) {
   const S = {
     idx: 0, last: 1, pending: -1, state: 'equip', t: 0, // state: equip | ready | holster | reload
     rl: null, ads: 0, sprint: 0, lower: 0,
-    nextFire: 0, burstLeft: 0, lastShot: -10, spray: 0, bloom: 0, heat: 0, cueT: 0, cueW: '',
+    nextFire: 0, burstLeft: 0, lastShot: -10, spray: 0, bloom: 0, heat: 0, cueT: 0, cueW: '', swapQ: -1, reloadQ: false,
     fireBuf: 0, spread: 0, shots: 0,
     grenades: GRENADE.charges, grenT: 0, throwT: -1, thrown: false,
     lastPitch: player.pitch, lastYaw: player.yaw,
@@ -138,6 +139,8 @@ export function init(ctx) {
 
   const hud = createHud(ctx, WEAPONS);
   const casings = createCasings(ctx);
+  const bolts = createBolts(ctx);
+  const _bolt = new THREE.Vector3();
   const proj = createProjectiles(ctx, {
     onBlastHit(t, dmg, killed, kind) { if (t !== player) { if (killed) onKill({ target: t, headshot: false, dist: t.pos.distanceTo(player.pos), weapon: kind === 'frag' ? GRENADE.name : 'DOORKNOCKER', blast: true }); events.emit('hitmarker', { headshot: false, kill: killed }); hud.hit({ headshot: false, kill: killed }); } },
     onBlast(point, radius) {
@@ -181,6 +184,7 @@ export function init(ctx) {
   function switchTo(i, instant = false) {
     if (i === S.idx && S.pending < 0 || i === S.pending || i < 0 || i >= inv.length) return;
     if (inv[i].locked) return; // not carried right now (raid.js sets this)
+    if (S.burstLeft > 0 && !instant) { S.swapQ = i; return; } // a burst always finishes: the swap follows it
     if (i === S.idx) { S.pending = -1; if (S.state === 'holster') { S.state = 'equip'; S.t = (1 - S.t / FEEL.holster) * cur().def.equip * 0.5; } return; }
     S.pending = i; endReload(true); S.burstLeft = 0;
     if (instant) { raise(); return; }
@@ -188,7 +192,7 @@ export function init(ctx) {
   }
   function raise() {
     cur().pose.visible = false;
-    S.last = S.idx; S.idx = S.pending; S.pending = -1;
+    S.last = S.idx; S.idx = S.pending; S.pending = -1; S.swapQ = -1; S.reloadQ = false;
     S.state = 'equip'; S.t = 0; S.spray = 0; S.bloom = 0; S.rl = null; carry.k = 0; S.ejects.length = 0;
     rec.tp = rec.ty = rec.ap = rec.ay = 0;
     cur().pose.visible = true;
@@ -204,6 +208,7 @@ export function init(ctx) {
   }
   function startReload() {
     const w = cur(), r = w.def.reload;
+    if (S.burstLeft > 0) { S.reloadQ = true; return false; } // not mid-burst: it starts when the burst is done
     if (S.state !== 'ready' || w.mag >= w.def.mag || w.reserve <= 0) return false;
     S.state = 'reload'; S.burstLeft = 0;
     // tactical reload: rounds left, so one stays chambered (mag + 1) and the charge is skipped
@@ -293,6 +298,7 @@ export function init(ctx) {
 
   function bullet(w, origin, dir, agg) {
     const hit = ctx.hitscan(origin, dir, w.range, player);
+    if (w.noFlash) bolts.launch(_bolt, hit ? hit.point : _m.copy(origin).addScaledVector(dir, w.range), !!hit && hit.type === 'world'); // crossbow: a bolt you can see
     if (!hit) return;
     const [f0, f1, fm] = w.falloff;
     let dmg = w.damage * lerp(1, fm, clamp((hit.dist - f0) / (f1 - f0), 0, 1));
@@ -317,7 +323,7 @@ export function init(ctx) {
     }
   }
 
-  function fire() {
+  function fire(cont = false) {
     const it = cur(), w = it.def;
     it.mag--; S.shots++;
     aimBasis();
@@ -343,8 +349,8 @@ export function init(ctx) {
         else { const inner = i <= 3; const n = inner ? 3 : w.pellets - 4; const k = inner ? i - 1 : i - 4;
           dirs.push(spreadDir(spreadRad, (k / n) * Math.PI * 2 + S.shots * 1.3 + (Math.random() - 0.5) * 0.7, (inner ? 0.42 : 0.86) + (Math.random() - 0.5) * 0.26)); }
       }
-      const shot = { weapon: w.id, name: w.name, origin, dir: w.pellets === 1 ? dirs[0] : aim, dirs, muzzle, by: player, pellets: w.pellets, suppressed: !!(w.suppressed || w.attSuppressed), loud: w.loud || 1 };
-      if (w.noFlash) { shot.dir = undefined; shot.noFlash = true; } // no muzzle blast: fx skips a shot that has no `dir`
+      const shot = { weapon: w.id, name: w.name, origin, dir: w.pellets === 1 ? dirs[0] : aim, dirs, muzzle, by: player, pellets: w.pellets, suppressed: !!(w.suppressed || w.attSuppressed), loud: w.loud || 1, flash: w.loud || 1 }; // flash: muzzle-flash scale for fx (compensator / brake > 1)
+      if (w.noFlash) { shot.dir = undefined; shot.noFlash = true; _bolt.copy(muzzle); } // no muzzle blast: fx skips a shot that has no `dir`
       events.emit('shot', shot);
       const agg = { hit: false, head: false, kill: false, dmg: 0, heads: new Set(), kills: [] };
       for (const d of dirs) bullet(w, origin, d, agg);
@@ -382,7 +388,7 @@ export function init(ctx) {
     if (sus && S.spray >= sus.after) S.bloom = Math.max(sus.bloomMax, Math.min(S.bloom, w.spread.bloomMax) - sus.rate);
     else S.bloom = Math.min(w.spread.bloomMax, S.bloom + w.spread.bloom * (it.mode === 'burst' ? 0.6 : 1));
     S.heat = Math.min(1, S.heat + (w.modes.includes('auto') ? 0.06 : 0.45));
-    S.lastShot = ctx.time; S.fireBuf = 0;
+    S.lastShot = ctx.time; if (!cont) S.fireBuf = 0; // (a click made during a burst stays queued for the next one)
   }
 
   function tryFire(dt) {
@@ -405,12 +411,13 @@ export function init(ctx) {
         break;
       }
       const base = Math.max(S.nextFire, ctx.time - dt); // carry the remainder so the rate of fire is exact at any frame rate
+      const cont = S.burstLeft > 0; // 2nd / 3rd round of a burst
       if (mode === 'burst') {
         if (S.burstLeft <= 0) S.burstLeft = w.burst.count;
         S.burstLeft--;
         S.nextFire = base + 60 / w.burst.rpm + (S.burstLeft === 0 ? w.burst.gap : 0);
       } else S.nextFire = base + 60 / w.rpm;
-      fire(); n++;
+      fire(cont); n++;
       if (S.state !== 'ready') break;
     }
   }
@@ -467,7 +474,17 @@ export function init(ctx) {
     if (lookX * rec.ay > 0) { const c = Math.sign(rec.ay) * Math.min(Math.abs(lookX), Math.abs(rec.ay)); rec.ay -= c; rec.ty = Math.abs(rec.ty) > Math.abs(c) && rec.ty * c > 0 ? rec.ty - c : 0; }
 
     // ---- input ---------------------------------------------------------------------
-    if (input.pressed.has('Mouse0')) { S.fireBuf = FEEL.fireBuffer; S.clickT = time; } else S.fireBuf -= dt;
+    if (input.pressed.has('Mouse0')) {
+      S.fireBuf = FEEL.fireBuffer; S.clickT = time;
+      // burst guns: one click = one burst. A click during a burst (or the pause after it) queues exactly one more,
+      // fired the moment the gun is ready again.
+      if (it.mode === 'burst' && w.burst && (S.burstLeft > 0 || time < S.nextFire))
+        S.fireBuf = Math.max(S.fireBuf, S.nextFire - time + (S.burstLeft > 0 ? S.burstLeft * 60 / w.burst.rpm + w.burst.gap : 0) + 0.05);
+    } else S.fireBuf -= dt;
+    if (S.burstLeft <= 0) { // whatever was asked for mid-burst happens now
+      if (S.swapQ >= 0) { const q = S.swapQ; S.swapQ = -1; S.reloadQ = false; switchTo(q); }
+      else if (S.reloadQ) { S.reloadQ = false; startReload(); }
+    }
     // a click made while the gun is still coming up is kept until it is up
     if ((S.state === 'equip' || S.state === 'holster') && S.fireBuf > -0.15 && S.fireBuf <= 0.03 && time - S.clickT < 0.4) S.fireBuf = 0.03;
     if (input.pressed.size) for (let i = 0; i < inv.length; i++) if (input.pressed.has(DIGITS[i])) switchTo(i);
@@ -476,7 +493,7 @@ export function init(ctx) {
     if (input.pressed.has('WheelUp')) switchTo(stepSlot(tgt, -1));
     if (input.pressed.has('KeyQ')) switchTo(S.last);
     if (input.pressed.has('KeyR')) startReload();
-    if (input.pressed.has('KeyB') && w.modes.length > 1) {
+    if (input.pressed.has('KeyB') && w.modes.length > 1 && S.burstLeft <= 0) {
       it.mode = w.modes[(w.modes.indexOf(it.mode) + 1) % w.modes.length]; S.burstLeft = 0;
       events.emit('fireMode', { weapon: w.id, mode: it.mode });
     }
@@ -574,7 +591,7 @@ export function init(ctx) {
       _ev.set(0, 0, 0).addScaledVector(_right, v[0] * (0.75 + Math.random() * 0.5)).addScaledVector(_up, v[1] * (0.75 + Math.random() * 0.5)).addScaledVector(_dir, -v[2] * (0.75 + Math.random() * 0.5)).add(player.vel);
       casings.spawn(it.vm.eject.getWorldPosition(_ep), _ev, e.w.id);
     }
-    casings.update(dt);
+    casings.update(dt); bolts.update(dt);
     S.trig = input.down('Mouse0') && S.state === 'ready' && it.mag > 0 && it.mode === 'auto' ? Math.max(S.trig, 0.7) : Math.max(0, S.trig - dt * 9);
 
     // ---- viewmodel pose ------------------------------------------------------------------------------
