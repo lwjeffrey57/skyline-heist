@@ -5,7 +5,7 @@ import { bump } from './progress.js';
 // Extraction mode. Deploy, search crates and fallen guards for loot, reach an extraction zone and hold it
 // to bank what you carry. Die or run out of time and the backpack is lost. Banked credits buy upgrades.
 
-const RAID = { time: 720, bots: 14, botDamage: 6, botRespawn: 25, extractHold: 6, extractRadius: 3.6, protect: 4 };
+const RAID = { time: 720, bots: 16, botDamage: 6, botRespawn: 25, extractHold: 6, extractRadius: 3.6, protect: 4 };
 const TIERS = {
   common: { color: '#c9d1d9', w: 60 }, uncommon: { color: '#5fd38a', w: 27 }, rare: { color: '#5aa9ff', w: 10 }, epic: { color: '#d48bff', w: 1.5 },
 };
@@ -247,6 +247,10 @@ export function init(ctx) {
         const inKeep = (px, pz) => b.keep && b.keep.some(([a0, a1, c0, c1]) => px > a0 && px < a1 && pz > c0 && pz < c1); // not on a stair core or over an open well
         for (const [sx, sz] of [[-1, -1], [1, 1], [-1, 1], [1, -1]]) if (Math.random() < (f === 0 ? 0.28 : 0.32) && !inKeep(b.x + sx * ix, b.z + sz * iz)) spots.push([kind, b.x + sx * ix, y, b.z + sz * iz]);
       }
+      if (b.campus) { // the campus is the richest place on the site: secure crates in the rooms of every upper floor, a vault case at the top of each wing
+        for (let f = 1; f < b.floors; f++) for (const sz of [-1, 1]) for (let n = 0; n < 2; n++) if (Math.random() < 0.6) spots.push(['secure', b.x + rnd(-1, 1) * (b.w / 2 - 6), f * b.floorHeight, b.z + sz * (b.d / 2 - 2.2 - Math.random() * 3)]);
+        spots.push(['vault', b.x + rnd(-6, 6), (b.floors - 1) * b.floorHeight, b.z + (b.annex ? 1 : -1) * (b.d / 2 - 3), false, true]);
+      }
       spots.push([b.floors >= 3 && !world.strongroom ? 'vault' : 'secure', b.x + rnd(-2, 2), b.roofY, b.stairAt && b.stairAt[1] < b.z - 0.5 ? b.z + b.d / 2 - 2.2 : b.z - b.d / 2 + 2.2, true]);
     }
     for (const [x, z] of [[-9, 26], [44, 9], [-54, 5], [10, -44], [-10, -40], [52, -46], [-56, -36], [3, 4.5], [-4.5, -3], [30, 40], [-40, 12], [20, -4]]) spots.push(['standard', x, 0, z]);
@@ -275,10 +279,10 @@ export function init(ctx) {
     else if (!spots.some((s) => s[0] === 'vault')) { const roofs = spots.filter((s) => s[4]); if (roofs.length) roofs[Math.floor(Math.random() * roofs.length)][0] = 'vault'; }
     // a few crates out in the approach ring, so the walk in is worth something
     if (world.coreHalf) for (let i = 0; i < 10; i++) { const a = Math.random() * Math.PI * 2, d = world.coreHalf + 6 + Math.random() * (world.arenaHalf - world.coreHalf - 14); spots.push(['standard', Math.max(-d, Math.min(d, Math.cos(a) * d * 1.3)), 0, Math.max(-d, Math.min(d, Math.sin(a) * d * 1.3))]); }
-    for (const [kind, x, y, z] of spots) {
+    for (const [kind, x, y, z, , lock] of spots) {
       if (!player.free(x, y + 0.75, z, 0.5)) continue; // something solid is in the way
       const L = addLootable(kind, x, floorBelow(x, y + 0.4, z), z, Math.random() * Math.PI);
-      if (kind === 'vault') { L.locked = !world.strongroom; // behind the strongroom door, the case itself is not locked
+      if (kind === 'vault') { L.locked = !!lock || !world.strongroom; // behind the strongroom door, the case itself is not locked
         if (Math.random() < 0.25) L.items.push({ name: 'Black Ledger', tier: 'epic', value: 2500 }); }
     }
     // better loot where the threat is higher: common items there are often re-rolled at much better odds

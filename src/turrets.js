@@ -9,7 +9,7 @@ const CFG = {
   hp: 80, range: 36, fovDeg: 70, sweepDeg: 55, sweepSpeed: 0.5, trackSpeed: 2.2,
   noticeTime: 1.5, loseTime: 4, reaction: 0.5, damage: 4, burst: 6, fireRate: 8, burstPause: [1.1, 1.8],
   hitNear: 0.45, hitFar: 0.15, chance: 0.65, count: [2, 4],
-  scanSpeed: 0.75, scanPause: [0.6, 1.6], indoor: [2, 4], // idle: turns all the way round, stopping now and then to stare; some stand inside buildings
+  scanSpeed: 0.75, scanPause: [0.6, 1.6], indoor: [4, 6], // idle: turns all the way round, stopping now and then to stare; some stand inside buildings
 };
 const EYE = { unaware: 0xffffff, suspicious: 0xffd24a, alert: 0xff3b1f };
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -81,7 +81,8 @@ export function init(ctx) {
 
   // inside buildings: on the ground floor of the bigger ones, somewhere with room to stand, clear of the stairs
   function deployIndoor(n) {
-    const big = world.buildings.filter((b) => b.hq || b.warehouse || b.tower || b.floors >= 2).sort((a, b) => (b.hq ? 2 : 0) - (a.hq ? 2 : 0) + Math.random() - 0.5);
+    const others = world.buildings.filter((b) => !b.hq && (b.warehouse || b.tower || b.floors >= 2)).sort(() => Math.random() - 0.5);
+    const wings = world.buildings.filter((b) => b.hq), big = wings.concat(wings, others); // two in each wing of the campus, the rest elsewhere
     let placed = 0;
     for (const b of big) {
       if (placed >= n) break;

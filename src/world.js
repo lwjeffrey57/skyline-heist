@@ -321,7 +321,8 @@ export function createWorld(scene, renderer) {
       outbuildings.push(buildings.pop());
     }
     // outposts: guarded buildings out in the ring, each with its own loot, so the site has more than one place worth raiding
-    const LOTS = [[105, 45], [-105, 45], [105, -45], [-105, -45], [45, 105], [-45, 105], [45, -105], [-45, -105]];
+    const campusSide = rand() < 0.5 ? 1 : -1; // the east or the west side of the site is given over to the office campus
+    const LOTS = [[105, 45], [-105, 45], [105, -45], [-105, -45], [45, 105], [-45, 105], [45, -105], [-45, -105]].filter(([lx]) => lx !== campusSide * 105);
     const order = LOTS.map((l) => [rand(), l]).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
     const TYPES = ['armoury', 'infirmary', 'signal', 'depot', 'watch'].map((t) => [rand(), t]).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
     for (const [ox, oz] of order.slice(0, 5)) {
@@ -452,17 +453,37 @@ export function createWorld(scene, renderer) {
       return finishLarge(x, z, W2, D2, 1, first, accent, { warehouse: true, keep: [[core[0] - 4.4, core[0] + 4.4, core[1] - 3.3, core[1] + 3.3]] }, 2); // one furnished floor, two storeys tall
     };
 
-    // the three lots the outposts did not take: one gets the headquarters, the others a tall block each
+    // the lot the outposts did not take gets a tall block
+    for (const [ox, oz] of order.slice(5)) tower(ox + jit(2), oz + jit(2), rand() < 0.5 ? 22 : 18, rand() < 0.5 ? 18 : 16, 3 + Math.floor(rand() * 3));
+    // the office campus: two large wings either side of the main road, joined by bridges over it. The biggest and
+    // best-guarded place on the site, with the best loot (raid.js) on its upper floors.
     {
-      const spare = order.slice(5, 8), spur = ([lx, lz]) => (lx === 45 && lz === -105) || (lx === -45 && lz === 105); // a road runs through these two
-      const hqLot = spare.find((l) => !spur(l)) || spare[0];
-      for (const lot of spare) {
-        const [ox, oz] = lot;
-        if (lot !== hqLot) { tower(ox + jit(2), oz + jit(2), rand() < 0.5 ? 22 : 18, rand() < 0.5 ? 18 : 16, 3 + Math.floor(rand() * 3)); continue; }
-        // long side runs along the ring, centre pulled in so it clears the ring road and the inner wall
-        const alongZ = Math.abs(ox) > Math.abs(oz), cx = alongZ ? Math.sign(ox) * 100 : ox, cz = alongZ ? oz : Math.sign(oz) * 100;
-        headquarters(cx, cz, alongZ ? 34 : 46, alongZ ? 46 : 34, rand() < 0.5 ? 4 : 3);
-      }
+      const cx = campusSide * 100, gap = 6.5; // each wing starts this far from the middle of the road
+      const main = headquarters(cx, gap + 23, 34, 46, 5), annex = headquarters(cx, -(gap + 17), 34, 34, 4);
+      main.name = 'Campus — main wing'; annex.name = 'Campus — annex'; main.campus = annex.campus = true; annex.annex = true;
+      const cut = (x0, x1, z0, z1, y0, y1) => { // knock a doorway through whatever wall pieces stand in this box
+        for (let k = colliders.length - 1; k >= 0; k--) {
+          const c = colliders[k];
+          if (c.tag !== 'wall' && c.tag !== 'pillar' && c.tag !== 'sill') continue;
+          if (c.max.x <= x0 || c.min.x >= x1 || c.max.z <= z0 || c.min.z >= z1 || c.max.y <= y0 || c.min.y >= y1) continue;
+          colliders.splice(k, 1); indexRemove(c); if (c.mesh) { c.mesh.removeFromParent(); c.mesh.geometry.dispose(); }
+        }
+      };
+      const bridge = (bx, f) => {
+        const y = f * FH, len = gap * 2, hw = 1.7;
+        cut(bx - hw, bx + hw, gap - 0.1, gap + T + 0.1, y + 0.05, y + 2.45); cut(bx - hw, bx + hw, -gap - T - 0.1, -gap + 0.1, y + 0.05, y + 2.45);
+        addBox(bx, y - SLAB, 0, hw * 2, SLAB, len, M.slab, { tag: 'slab', destructible: true });
+        for (const sd of [-1, 1]) addBox(bx + sd * (hw - 0.1), y, 0, 0.2, 1.1, len, M.concreteDark, { tag: 'cover', destructible: true });
+        addBox(bx, y + 2.7, 0, hw * 2 + 0.3, 0.16, len, M.metal, { solid: false });
+        for (const sd of [-1, 1]) for (const bz of [-gap + 0.4, gap - 0.4]) addBox(bx + sd * (hw - 0.1), y + 1.1, bz, 0.14, 1.6, 0.14, M.metal, { solid: false, shadow: false });
+      };
+      // each bridge lands in a room whose corridor door is straight ahead (rooms are a quarter of the wing wide)
+      const BR = [[cx - 4.2, 1], [cx + 4.2, 2], [cx - 4.2, 3]]; // the end rooms hold the stair cores, so the bridges use the two middle ones
+      for (const [bx, f] of BR) bridge(bx, f);
+      main.bridges = annex.bridges = BR;
+      for (const [bx] of BR) { main.keep.push([bx - 2.3, bx + 2.3, gap, gap + 7.4]); annex.keep.push([bx - 2.3, bx + 2.3, -gap - 7.4, -gap]); } // furniture stays out of the way in
+      // checkpoints on the road at both ends of the campus: staggered barriers you have to weave through
+      for (const ex of [cx - 21, cx + 21]) { addBox(ex, 0, -1.9, 0.6, 1.2, 3.0, M.concrete, { tag: 'cover', destructible: true }); addBox(ex + 2.2, 0, 1.9, 0.6, 1.2, 3.0, M.concrete, { tag: 'cover', destructible: true }); }
     }
     // and two long, lower halls in the corners of the site
     const corners = [[110, 110], [-110, 110], [110, -110], [-110, -110]].map((c) => [rand(), c]).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
