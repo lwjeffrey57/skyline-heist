@@ -10,7 +10,7 @@ const WALK = 5.5, SPRINT = 8.6, CROUCH_SPEED = 3.0;
 const JUMP = 8.4;
 const STEP = 0.5;
 const ZIP_SPEED = 15, ZIP_HANG = 2.1;
-const DASH = { speed: 25, time: 0.16, cooldown: 3, carry: 10.5 }; // Q: a short burst in the direction you are moving
+const DASH = { speed: 27, time: 0.3, cooldown: 3, carry: 11 }; // Q: a short burst in the direction you are moving
 
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
 
@@ -189,14 +189,15 @@ export class Player {
     const sideSpeed = this.vel.x * cos - this.vel.z * sin;
     const leanTarget = this.state === 'normal' && this.grounded && !this.sliding ? THREE.MathUtils.clamp(sideSpeed / WALK, -1, 1) : 0;
     this.leanV += (-110 * (this.strafeLean - leanTarget) - 15 * this.leanV) * dt; this.strafeLean += this.leanV * dt;
-    const rollTarget = this.sliding ? 0.07 : this.state === 'zip' ? 0.03 : -this.strafeLean * 0.034;
+    const rollTarget = this.dashT > 0 ? -(this.dashSide || 0) * 0.09 : this.sliding ? 0.07 : this.state === 'zip' ? 0.03 : -this.strafeLean * 0.034;
     this.roll = damp(this.roll, rollTarget, 14, dt);
     const side = this.strafeLean * 0.05 + bobX;
     const cam = this.camera;
     cam.position.set(this.pos.x + cos * side, this.pos.y + this.eye + this.stepSmooth + this.dip + bobY - Math.abs(this.strafeLean) * 0.012, this.pos.z - sin * side);
     cam.rotation.set(this.pitch, this.yaw, this.roll, 'YXZ');
-    const fovTarget = this.baseFov * this.fovScale + THREE.MathUtils.clamp((hs - WALK) * 1.9, 0, 16);
-    cam.fov = damp(cam.fov, fovTarget, 7, dt); cam.updateProjectionMatrix();
+    this.dashGlow = this.dashT > 0 ? 1 : Math.max(0, (this.dashGlow || 0) - dt * 3.2); // the view stays stretched a moment after the dash ends
+    const fovTarget = this.baseFov * this.fovScale + THREE.MathUtils.clamp((hs - WALK) * 1.9, 0, 16) + this.dashGlow * 16;
+    cam.fov = damp(cam.fov, fovTarget, this.dashT > 0 ? 22 : 7, dt); cam.updateProjectionMatrix();
   }
 
   updateNormal(dt, wx, wz, mf, ms, fx, fz, wantCrouch) {
@@ -245,7 +246,8 @@ export class Player {
     if (inp.pressed.has('KeyQ') && this.dashCd <= 0) {
       this.dashX = wx || wz ? wx : fx; this.dashZ = wx || wz ? wz : fz;
       this.dashT = DASH.time; this.dashCd = DASH.cooldown; this.sliding = false;
-      this.emit('dash', { x: this.dashX, z: this.dashZ, side: this.dashX * -fz + this.dashZ * fx });
+      this.dashSide = this.dashX * -fz + this.dashZ * fx; // +1 = dashing to your right: the camera leans into it
+      this.emit('dash', { x: this.dashX, z: this.dashZ, side: this.dashSide, time: DASH.time });
     }
     if (this.dashT > 0) {
       this.dashT -= dt; v.x = this.dashX * DASH.speed; v.z = this.dashZ * DASH.speed; if (v.y < 0) v.y = 0;

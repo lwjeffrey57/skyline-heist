@@ -9,6 +9,7 @@ const CFG = {
   hp: 80, range: 36, fovDeg: 70, sweepDeg: 55, sweepSpeed: 0.5, trackSpeed: 2.2,
   noticeTime: 1.5, loseTime: 4, reaction: 0.5, damage: 4, burst: 6, fireRate: 8, burstPause: [1.1, 1.8],
   hitNear: 0.45, hitFar: 0.15, chance: 0.65, count: [2, 4],
+  scanSpeed: 0.75, scanPause: [0.6, 1.6], indoor: [2, 4], // idle: turns all the way round, stopping now and then to stare; some stand inside buildings
 };
 const EYE = { unaware: 0xffffff, suspicious: 0xffd24a, alert: 0xff3b1f };
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -27,7 +28,10 @@ function buildMesh() {
   add(head, new THREE.CylinderGeometry(0.045, 0.045, 0.7, 8), dark, -0.11, -0.02, 0.6, Math.PI / 2);
   add(head, new THREE.CylinderGeometry(0.045, 0.045, 0.7, 8), dark, 0.11, -0.02, 0.6, Math.PI / 2);
   add(head, new THREE.SphereGeometry(0.07, 10, 8), eye, 0, 0.09, 0.31);
-  return { group: g, head, eye };
+  // a faint beam shows where it is looking, in the colour of its state
+  const beamMat = new THREE.MeshBasicMaterial({ color: EYE.unaware, transparent: true, opacity: 0.05, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  const beam = new THREE.Mesh(new THREE.ConeGeometry(2.6, 9, 14, 1, true), beamMat); beam.rotation.x = -Math.PI / 2; beam.position.set(0, 0.05, 4.85); head.add(beam);
+  return { group: g, head, eye, beam: beamMat };
 }
 
 export function init(ctx) {
@@ -37,10 +41,10 @@ export function init(ctx) {
   const eyeP = new THREE.Vector3(), tmp = new THREE.Vector3();
 
   function make() {
-    const { group, head, eye } = buildMesh(); scene.add(group); group.visible = false;
+    const { group, head, eye, beam } = buildMesh(); scene.add(group); group.visible = false;
     const t = {
       name: 'Guardian turret', kind: 'turret', team: 'enemy', isTurret: true, alive: false, radius: 0.5, height: 1.5, hp: 0, maxHp: CFG.hp,
-      pos: new THREE.Vector3(), c: new THREE.Vector3(), group, head, eye, base: 0, yaw: 0, sweepT: Math.random() * 6,
+      pos: new THREE.Vector3(), c: new THREE.Vector3(), group, head, eye, beam, base: 0, yaw: 0, sweepT: Math.random() * 6, dir: Math.random() < 0.5 ? -1 : 1, stareT: 0, nextStare: 2 + Math.random() * 4,
       awareness: 0, alertState: 'unaware', lastSeen: 99, los: false, burstLeft: 0, shotT: 0, pauseT: 0.5, reactT: 0,
       takeDamage(amount, info = {}) {
         if (!t.alive) return;
@@ -75,7 +79,22 @@ export function init(ctx) {
   }
   function clear() { for (const t of list) { t.alive = false; t.group.visible = false; t.awareness = 0; t.alertState = 'unaware'; } }
 
-  events.on('raidStart', () => { active = true; clear(); if (Math.random() < CFG.chance) deploy(Math.round(rnd(CFG.count[0], CFG.count[1]))); });
+  // inside buildings: on the ground floor of the bigger ones, somewhere with room to stand, clear of the stairs
+  function deployIndoor(n) {
+    const big = world.buildings.filter((b) => b.hq || b.warehouse || b.tower || b.floors >= 2).sort((a, b) => (b.hq ? 2 : 0) - (a.hq ? 2 : 0) + Math.random() - 0.5);
+    let placed = 0;
+    for (const b of big) {
+      if (placed >= n) break;
+      for (let tries = 0; tries < 14; tries++) {
+        const x = b.x + rnd(-1, 1) * (b.w / 2 - 2.5), z = b.z + rnd(-1, 1) * (b.d / 2 - 2.5);
+        const keep = b.keep || [[b.x - 4.4, b.x + 4.4, b.z - 3.3, b.z + 3.3]];
+        if (keep.some(([a0, a1, c0, c1]) => x > a0 && x < a1 && z > c0 && z < c1)) continue;
+        if (Math.hypot(x - player.pos.x, z - player.pos.z) < 30) continue;
+        if (add(x, z, Math.random() * Math.PI * 2)) { placed++; break; }
+      }
+    }
+  }
+  events.on('raidStart', () => { active = true; clear(); if (Math.random() < CFG.chance) deploy(Math.round(rnd(CFG.count[0], CFG.count[1]))); deployIndoor(Math.round(rnd(CFG.indoor[0], CFG.indoor[1]))); });
   events.on('raidEnd', () => { active = false; clear(); });
 
   function fire(t, dist) {
@@ -108,11 +127,16 @@ export function init(ctx) {
       else { t.lastSeen += dt; if (t.lastSeen > 0.8) t.awareness = Math.max(0, t.awareness - dt * (t.alertState === 'alert' ? 1 / CFG.loseTime : 0.3)); }
       const was = t.alertState;
       t.alertState = t.awareness >= 1 || (was === 'alert' && t.lastSeen < CFG.loseTime) ? 'alert' : t.awareness >= 0.35 ? 'suspicious' : 'unaware';
-      if (t.alertState !== was) { t.eye.emissive.setHex(EYE[t.alertState]); if (t.alertState === 'alert') { t.reactT = CFG.reaction; t.burstLeft = 0; t.pauseT = 0; events.emit('guardAlert', { bot: t }); } }
+      if (t.alertState !== was) { t.eye.emissive.setHex(EYE[t.alertState]); t.beam.color.setHex(EYE[t.alertState]); t.beam.opacity = t.alertState === 'unaware' ? 0.05 : 0.14; if (t.alertState === 'alert') { t.reactT = CFG.reaction; t.burstLeft = 0; t.pauseT = 0; events.emit('guardAlert', { bot: t }); } }
       // aim: sweep its arc when idle, turn toward you when it has noticed something
-      let want;
-      if (t.alertState === 'unaware') { t.sweepT += dt * CFG.sweepSpeed; want = t.base + Math.sin(t.sweepT) * sweep; } else want = t.los || t.lastSeen < 1.5 ? toPlayer : t.yaw;
-      t.yaw += THREE.MathUtils.clamp(wrap(want - t.yaw), -CFG.trackSpeed * dt, CFG.trackSpeed * dt);
+      if (t.alertState === 'unaware') {
+        // scanning: turn steadily all the way round, pausing now and then to stare, sometimes reversing
+        if (t.stareT > 0) t.stareT -= dt;
+        else { t.yaw = wrap(t.yaw + t.dir * CFG.scanSpeed * dt); t.nextStare -= dt; if (t.nextStare <= 0) { t.stareT = rnd(CFG.scanPause[0], CFG.scanPause[1]); t.nextStare = rnd(2.5, 6); if (Math.random() < 0.3) t.dir = -t.dir; } }
+      } else {
+        const want = t.los || t.lastSeen < 1.5 ? toPlayer : t.yaw;
+        t.yaw += THREE.MathUtils.clamp(wrap(want - t.yaw), -CFG.trackSpeed * dt, CFG.trackSpeed * dt);
+      }
       t.head.rotation.y = t.yaw;
       // fire only when fully alert, in view and lined up
       if (t.alertState === 'alert' && t.los && Math.abs(wrap(toPlayer - t.yaw)) < 0.2) {
@@ -128,7 +152,7 @@ export function init(ctx) {
     if (!player.free(x, 0.01, z, 1.6) || list.some((o) => o.alive && Math.hypot(o.pos.x - x, o.pos.z - z) < 4)) return false;
     const t = list.find((o) => !o.alive) || make();
     t.pos.set(x, 0, z); t.c.set(x, 1.25, z); t.base = t.yaw = yaw; t.hp = CFG.hp; t.alive = true; t.awareness = 0; t.alertState = 'unaware'; t.lastSeen = 99;
-    t.eye.emissive.setHex(EYE.unaware); t.group.position.set(x, 0, z); t.group.visible = true; return true;
+    t.eye.emissive.setHex(EYE.unaware); t.beam.color.setHex(EYE.unaware); t.beam.opacity = 0.05; t.group.position.set(x, 0, z); t.group.visible = true; return true;
   }
   ctx.turrets = { list, config: CFG, deploy, add };
   return { update };
