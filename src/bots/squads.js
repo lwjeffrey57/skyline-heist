@@ -41,7 +41,7 @@ export function createSquads(mgr, hooks) {
     const slot = (q, x, y, z, yaw, kind = null, box = null) => { const s = { squad: q, x, y, z, yaw, kind, box, id: -1, pos: new THREE.Vector3(x, y, z), bot: null, ok: false }; q.slots.push(s); return s; };
     // strongroom / plaza: a trio around it, facing outward
     { const q = squad('post', 'strongroom'), sr = world.strongroom, y = sr ? sr.y : 1;
-      for (let i = 0; i < 3; i++) { const a = 0.6 + i * Math.PI * 2 / 3; slot(q, Math.sin(a) * 7.5, y, Math.cos(a) * 7.5, a); }
+      for (let i = 0; i < 3; i++) { const a = 0.6 + i * Math.PI * 2 / 3; slot(q, Math.sin(a) * 7.5, y, Math.cos(a) * 7.5, a, i === 2 ? 'grenadier' : 'grunt'); }
       posts.push(q); }
     // a building: one guard on its outer side facing the way intruders come, one on the side facing the centre
     const bldg = (b, name) => {
@@ -57,24 +57,32 @@ export function createSquads(mgr, hooks) {
     outs.sort((a, b) => (rank[a.outpost] ?? 5) - (rank[b.outpost] ?? 5));
     const outSquads = outs.map((b) => {
       const q = bldg(b, b.outpost);
-      if (b.outpost === 'armoury') q.slots[0].kind = 'heavy';
+      if (b.outpost === 'armoury') { q.slots[0].kind = 'heavy'; q.slots[0].late = true; }
+      else if (b.outpost !== 'watch') { q.slots[0].kind = 'grenadier'; q.slots[1].kind = 'grunt'; }
       if (b.outpost === 'watch') { // the marksman goes up on the roof (or the top floor) if there is a way up
-        const m = (b.wallThickness || 0.3) + 0.8, s = q.slots[0]; s.kind = 'marksman';
+        const m = (b.wallThickness || 0.3) + 0.8, s = q.slots[0]; s.kind = 'marksman'; s.late = true;
         s.box = [b.x - b.w / 2 + m, b.x + b.w / 2 - m, b.z - b.d / 2 + m, b.z + b.d / 2 - m, b.floors * b.floorHeight - 0.3, b.floors * b.floorHeight + 0.4];
       }
       return q;
     });
     const gate = (gx, gz, name) => { // a pair just outside a gateway of the inner wall, either side of the road
       const q = squad('post', name), ox = Math.abs(gx) > Math.abs(gz) ? Math.sign(gx) : 0, oz = ox ? 0 : Math.sign(gz), yaw = Math.atan2(ox, oz);
-      for (const s of [-1, 1]) slot(q, gx + ox * 2.6 - oz * 2.4 * s, 0, gz + oz * 2.6 + ox * 2.4 * s, yaw + s * 0.25);
+      for (const s of [-1, 1]) slot(q, gx + ox * 2.6 - oz * 2.4 * s, 0, gz + oz * 2.6 + ox * 2.4 * s, yaw + s * 0.25, s < 0 ? 'shield' : 'grunt'); // a gate pair: a shield and a rifleman
       return q;
     };
     const gates = world.gates && world.gates.length ? world.gates.map(([gx, gz]) => [gx, gz]) : [[0, -IW], [0, IW], [-IW, 0], [IW, 0], [38, -IW], [-38, IW]];
     const gateSquads = gates.map(([x, z], i) => gate(x, z, 'gate' + i));
     const towers = world.buildings.filter((b) => b.tower && !b.hq).map((b, i) => bldg(b, 'tower' + i));
-    world.buildings.filter((b) => b.hq).forEach((b, i) => posts.push(bldg(b, 'hq' + i))); // every wing of the campus is always held
+    world.buildings.filter((b) => b.hq).forEach((b, i) => { // every wing of the campus is always held
+      const q = bldg(b, 'hq' + i);
+      if (i === 1 && !(world.ramparts && world.ramparts.length)) { // no wall walk on this map: a marksman on the second wing's roof
+        const m = (b.wallThickness || 0.3) + 0.8, s = q.slots[0], top = (b.baseY || 0) + b.floors * b.floorHeight; s.kind = 'marksman';
+        s.box = [b.x - b.w / 2 + m, b.x + b.w / 2 - m, b.z - b.d / 2 + m, b.z + b.d / 2 - m, top - 0.3, top + 0.4];
+      }
+      posts.push(q);
+    });
     // sentries on the inner wall's walkway, where the map has one: a pair over a gate, looking out over the approach
-    const wallSquads = (world.ramparts || []).map((pair, i) => { const q = squad('post', 'rampart' + i); for (const [x, y, z, yaw] of pair) slot(q, x, y, z, yaw); return q; });
+    const wallSquads = (world.ramparts || []).map((pair, i) => { const q = squad('post', 'rampart' + i); pair.forEach(([x, y, z, yaw], k) => slot(q, x, y, z, yaw, k === 0 ? (i % 2 ? 'grenadier' : 'marksman') : 'grunt')); return q; }); // up on the wall: a marksman (or a grenadier) and a rifleman
     posts.push(...wallSquads.slice(0, 2));
     posts.push(outSquads[0], outSquads[1], gateSquads[0], outSquads[2], gateSquads[1], outSquads[3], outSquads[4], gateSquads[2], gateSquads[3], towers[0], towers[1], ...wallSquads.slice(2), gateSquads[4], gateSquads[5], towers[2], towers[3]);
     // patrol routes
@@ -92,7 +100,7 @@ export function createSquads(mgr, hooks) {
     let np = 0;
     posts.filter(Boolean).forEach((q, i) => {
       out.push(q);
-      if ((i + 1) % Math.max(1, cfg.patrolEvery) === 0 && np < 4 && inner.length >= 3) { const p = squad('patrol', 'patrol' + np); p.route = np % 2 ? outer : inner; slot(p, 0, 0, 0, 0); slot(p, 0, 0, 0, 0); out.push(p); np++; }
+      if ((i + 1) % Math.max(1, cfg.patrolEvery) === 0 && np < 4 && inner.length >= 3) { const p = squad('patrol', 'patrol' + np); p.route = np % 2 ? outer : inner; slot(p, 0, 0, 0, 0, 'scout'); slot(p, 0, 0, 0, 0, 'grunt'); out.push(p); np++; } // a patrol: a rusher and a rifleman
     });
     plan = out; flat = []; for (const q of plan) for (const s of q.slots) flat.push(s);
   }
@@ -163,7 +171,7 @@ export function createSquads(mgr, hooks) {
     const s = bot.slot; if (!s) return;
     if (s.squad.type === 'post') { bot.post.copy(s.pos); bot.aimYaw = bot.bodyYaw = bot.scanBase = s.yaw; bot.scanAmp = 0.3; bot.waitT = rand(1, 4); }
     else { bot.seqDone = -1; bot.waitT = rand(0.3, 1.2); }
-    if (s.kind && mgr.time - planT > 8) wantKind(s);
+    if (s.late && mgr.time - planT > 8) wantKind(s);
   }
 
   // the armoury's heavy and the watch post's marksman (raid.js may also convert a guard there: never double up)
@@ -174,6 +182,8 @@ export function createSquads(mgr, hooks) {
       const o = other.slot; o.bot = b; s.bot = other; b.slot = o; other.slot = s; b.post.copy(o.pos); other.post.copy(s.pos); b.waitT = other.waitT = 0.2; return;
     }
     if (b.state === 'combat') return;
+    const K = cfg.kinds && cfg.kinds[s.kind]; let n = 0; for (const g of mgr.guards) if (g.alive && g.kind === s.kind) n++;
+    if (!K || (K.max && n >= K.max)) return; // enough of that type about already
     const full = b.hp >= b.maxHp - 1; b.setKind(s.kind); b.maxHp = b.cfg.hp; if (full) b.hp = b.maxHp; else b.hp = Math.min(b.hp, b.maxHp); b.role = 'passive';
   }
 
@@ -391,7 +401,7 @@ export function createSquads(mgr, hooks) {
         }
       }
       kindT -= 0.5;
-      if (kindT <= 0 && now - planT > 8) { kindT = 2; for (const s of flat) if (s.kind && s.bot && s.squad.type === 'post') wantKind(s); }
+      if (kindT <= 0 && now - planT > 8) { kindT = 2; for (const s of flat) if (s.late && s.bot && s.squad.type === 'post') wantKind(s); }
     }
 
     for (let i = raidSquads.length - 1; i >= 0; i--) {
@@ -433,5 +443,5 @@ export function createSquads(mgr, hooks) {
   }
   function reset() { if (!plan) buildPlan(); planT = mgr.time; for (const s of flat) { s.bot = null; s.ok = false; } for (const q of plan) { q.members.length = 0; q.at = -1; q.hold = false; } for (const b of mgr.guards) { b.slot = null; b.squad = null; } }
 
-  return { assignGuard, slotSpawn, spawned, release, goal, spawnRaiders, clearRaiders, schedule, update, botDied, applyAggression, reset, relist, raidSquads, get plan() { if (!plan) buildPlan(); return plan; }, pending };
+  return { planFresh: () => mgr.time - planT < 8, assignGuard, slotSpawn, spawned, release, goal, spawnRaiders, clearRaiders, schedule, update, botDied, applyAggression, reset, relist, raidSquads, get plan() { if (!plan) buildPlan(); return plan; }, pending };
 }

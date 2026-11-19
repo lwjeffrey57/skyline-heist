@@ -15,6 +15,14 @@ import { rand, randR, randI } from './config.js';
 //   near misses -> suppress(): the guard ducks, hesitates and shoots worse for a moment
 //   death       -> die() picks a fall from the killing shot (see body.js die()) and throws the physics body with it
 // Fairness: every burst is announced by a tell (weapon snaps up from low ready, visor flares) for cfg.tellTime.
+//
+// ENEMY TYPES (bot.special, from config kinds[...].set.special; see config.js for the numbers):
+//   'shield'      shieldCheck(): bullets from the front arc are stopped while bot.shieldUp (takeDamage returns 'blocked',
+//                 emits impact { kind:'shield', blocked:true }); feet, flanks, back, shots from above and blasts get through
+//   'rusher'      thinkRush(): run (zigzag) -> windup (tell) -> lunge (committed line, melee once) -> recover. bot.rush.phase
+//   'marksman'    fireSnipe(): laser wind-up (bot.aimT > 0, bot.locked for the last moment) -> one heavy round; cancelSnipe()
+//   'grenadier'   grenadeTick(): wind-up (bot.grenWind > 0) -> roles.throwGrenade(); otherwise a weak rifleman
+//   'suppressor'  the normal burst code with a long tell (spool) and rounds fired down the aim line in a cone
 
 const EYE = 1.62;
 const TMP = new THREE.Vector3(), TMP2 = new THREE.Vector3(), TMP3 = new THREE.Vector3();
@@ -35,9 +43,24 @@ export class Bot {
     const c = Object.create(base);
     for (const k in K.set) c[k] = K.set[k];
     for (const k in K.mul) Object.defineProperty(c, k, { get: () => base[k] * K.mul[k], enumerable: true });
-    this.cfg = c; this.kind = name; this.kindLabel = K.label || 'Guard';
-    this.height = this.baseHeight = 1.8 * (K.scale || 1);
-    this.mesh.root.scale.setScalar(K.scale || 1); this.mesh.mats.accent.emissive.setHex(K.color ?? base.accentColor);
+    c.color = K.color ?? base.accentColor;
+    this.cfg = c; this.kind = name; this.kindLabel = K.label || 'Guard'; this.special = c.special || null;
+    const sc = K.scale || 1, wide = K.wide || 1;
+    this.height = this.baseHeight = 1.8 * sc; this.radius = 0.35 * Math.max(1, wide);
+    this.mesh.root.scale.set(sc * wide, sc, sc * wide); this.mesh.mats.accent.emissive.setHex(c.color); this.mesh.mats.visor.emissive.setHex(c.color);
+    if (this.mesh.barFill) this.mesh.barFill.material.color.setHex(c.color);
+    this.mesh.setOutfit(K.outfit || name);
+    this.resetRole();
+    if (this.alive) { this.burstLeft = 0; this.telling = false; this.mag = Math.min(this.mag || c.magSize, c.magSize); this.prefRange = randR(c.preferredRange); } // converted while alive (raid.js, squads.js)
+  }
+
+  // per-type attack state (see the header): cleared on spawn and when the type changes
+  resetRole() {
+    const R = this.rush || (this.rush = { phase: 'run', t: 0, dx: 0, dz: 1, hit: false, zig: 1, zigT: 0, repT: 0 });
+    R.phase = 'run'; R.t = 0; R.hit = false; R.zigT = 0; R.repT = 0;
+    this.shieldUp = false; this.shieldDownT = 0; this.blockPend = 0; this.blockT = -1; this.blockSrc = null; this.blockWeapon = null; this.blocked = 0;
+    this.aimT = 0; this.locked = false; this.losLostT = 0; this.snipeCd = 0; this.grenCd = 2 + Math.random() * 3; this.grenWind = 0;
+    if (this.mgr.roles) this.mgr.roles.laserOff(this);
   }
 
   constructor(mgr, opts = {}) {
@@ -65,7 +88,8 @@ export class Bot {
     this.lookPt = new THREE.Vector3(); this.stuckPos = new THREE.Vector3();
     this.aimDir = new THREE.Vector3(0, 0, 1);
     this.hitDir = new THREE.Vector3(0, 0, 1); this.baseHeight = 1.8; this.huntPos = new THREE.Vector3();
-    this.animState = { pos: this.pos, vel: this.vel, bodyYaw: 0, aimYaw: 0, aimPitch: 0, grounded: true, aiming: 0, hp01: 1, showBar: false, camera: this.ctx.camera, floorY: 0, fadeStart: 2, fadeTime: 1.2, stag: 0, stagX: 0, crouch: 0, tell: 0, limp: 0 };
+    this.special = null; this.blockFrom = new THREE.Vector3(); this.lockPt = new THREE.Vector3(); this.grenAim = new THREE.Vector3(); this.resetRole();
+    this.animState = { pos: this.pos, vel: this.vel, bodyYaw: 0, aimYaw: 0, aimPitch: 0, grounded: true, aiming: 0, hp01: 1, showBar: false, camera: this.ctx.camera, floorY: 0, fadeStart: 2, fadeTime: 1.2, stag: 0, stagX: 0, crouch: 0, tell: 0, limp: 0, shield: 0, spin: 0, claw: 0, throw: 0 };
     this.percT = Math.random() * this.cfg.perceptionInterval;
     // guard detection (team mode): role, awareness of the player, alert state — read by the HUD
     this.role = 'active'; this.post = new THREE.Vector3(); this.awareness = 0; this.alertState = 'unaware'; this.lastSeenPlayerT = Infinity;
@@ -101,6 +125,7 @@ export class Bot {
     this.underFire = false; this.defensive = false; this.flankUntil = -99; this.flankCdT = this.mgr.time + rand(2, 8); this.hunting = false; this.huntCdT = 0;
     this.height = this.baseHeight;
     this.foe = null; this.foeVis = false; this.foeRevealT = -99; this.concernPl = false; this.scanAmp = 1.05; this.faceBot = null; this.lootUntil = -99; this.seqDone = -1; this.far = false;
+    this.resetRole();
     this.mesh.reset();
     this.ctx.events.emit('botSpawned', { bot: this, point: this.pos.clone() });
   }
@@ -111,8 +136,16 @@ export class Bot {
   takeDamage(amount, info = {}) {
     if (!this.alive || !(amount > 0)) return;
     const cfg = this.cfg, now = this.mgr.time, wasHp = this.hp;
-    this.hp -= amount; this.hurtT = 0;
     const from = info.from || (info.source && info.source.pos) || null;
+    let weak = false;
+    if (this.special === 'shield' && !info.shieldBypass) { amount = this.shieldCheck(amount, info, from); if (!(amount > 0)) return 'blocked'; }
+    else if (this.special === 'suppressor' && from && !info.explosive) { // the drum on its back is the weak spot
+      const off = Math.abs(wrap(Math.atan2(from.x - this.pos.x, from.z - this.pos.z) - this.bodyYaw));
+      if (off > 2.1) { amount *= cfg.backMult || 1; weak = true; } else if (off < 1.2 && !info.headshot) amount *= cfg.frontMult || 1; // plated in front (not the head)
+    }
+    if (this.aimT > 0) this.cancelSnipe('hit');
+    if (this.grenWind > 0 && amount >= 15) { this.grenWind = 0; this.grenCd = Math.max(this.grenCd, 2.5); }
+    this.hp -= amount; this.hurtT = 0;
     let lx = 0, lz = -1;
     if (info.dir || from) { // push direction (away from the shooter), world and in the bot's local frame
       let dx = info.dir ? info.dir.x : this.pos.x - from.x, dz = info.dir ? info.dir.z : this.pos.z - from.z;
@@ -132,7 +165,7 @@ export class Bot {
     this.flinchErr = Math.min(0.12, this.flinchErr + cfg.aimErrorFlinch * Math.min(1.5, amount / 20));
     this.errT = 0;
     this.telling = false; this.tellT = 0; // knocked off aim: the next burst has to be announced again
-    this.ctx.events.emit('botDamaged', { bot: this, amount, hp: this.hp, from, headshot: !!info.headshot, dir: this.hitDir, zone });
+    this.ctx.events.emit('botDamaged', { bot: this, amount, hp: this.hp, from, headshot: !!info.headshot, dir: this.hitDir, zone, weak });
     if (this.hp <= 0) { this.die(info, lx, lz, amount); return; }
     // heavy hit / blast / headshot / sustained fire -> stagger
     const sd = cfg.staggerDamage;
@@ -144,8 +177,14 @@ export class Bot {
       this.defensive = true; this.modeT = 0; this.mgr.callout(this, 'wounded'); // badly hurt: fall back and fight from cover
     }
     if (this.state === 'combat' && this.mode !== 'cover') { this.underFire = true; this.reposT = Math.min(this.reposT, rand(0.08, 0.3)); } // do not stand there and take it
+    this.noticeAttacker(info, from);
+  }
+
+  // being hit (or having a round stopped by the shield) reveals the attacker, even from behind
+  noticeAttacker(info, from) {
+    const cfg = this.cfg, now = this.mgr.time;
     const atk = info.source;
-    if (atk && atk !== this && atk.pos && atk.alive !== false) { // being hit reveals the attacker, even from behind
+    if (atk && atk !== this && atk.pos && atk.alive !== false) {
       this.lastAttacker = atk; this.lastAttackT = this.mgr.time;
       const m = this.memOf(atk); m.revealT = this.mgr.time + 2.5; m.aware = 1;
       this.percT = Math.min(this.percT, 0.03);
@@ -167,6 +206,31 @@ export class Bot {
     }
   }
 
+  // The shield bearer's frontal shield. Returns the damage that gets through (0 = stopped).
+  // Open: the back and flanks (outside cfg.shieldArc), the feet, shots from well above, and any time the shield is down
+  // (unaware, firing, staggered). A blast from the front is damped to cfg.shieldBlast and knocks the shield aside.
+  shieldCheck(amount, info, from) {
+    if (!this.shieldUp || !from) return amount;
+    const cfg = this.cfg, dx = from.x - this.pos.x, dz = from.z - this.pos.z;
+    if (Math.abs(wrap(Math.atan2(dx, dz) - this.bodyYaw)) > cfg.shieldArc * Math.PI / 360) return amount;
+    if (Math.atan2(from.y - (this.pos.y + this.height * 0.8), Math.max(0.1, Math.hypot(dx, dz))) > cfg.shieldOverTop) return amount;
+    if (info.explosive) return amount * cfg.shieldBlast; // (the stagger that follows drops the shield)
+    if (info.point) {
+      if (info.point.y - this.pos.y < cfg.shieldFeet * this.height) return amount;
+      this.ptSkip++; this.blockFx(info.point, from, info.source);
+    } else { // the hit point arrives with the 'impact' event (hitAt): feet still count
+      this.blockPend = amount; this.blockT = this.mgr.time; this.blockFrom.copy(from); this.blockSrc = info.source || null; this.blockWeapon = info.weapon || null;
+    }
+    this.blocked++; this.mgr.stats.blocked = (this.mgr.stats.blocked || 0) + 1;
+    this.mesh.flinch(0, -1, 0.25);
+    this.noticeAttacker(info, from);
+    return 0;
+  }
+  blockFx(point, from, by) {
+    TMP.subVectors(from, point).normalize();
+    this.ctx.events.emit('impact', { point: point.clone(), normal: TMP.clone(), kind: 'shield', target: this, damage: 0, by: by || null, blocked: true });
+  }
+
   // which part of the body a world point is on; also stores hitSide (-1..1, + = the bot's left)
   zoneOf(point) {
     const rel = (point.y - this.pos.y) / this.height, dx = point.x - this.pos.x, dz = point.z - this.pos.z;
@@ -175,8 +239,21 @@ export class Bot {
   }
 
   // The exact point of a hit that takeDamage() has just handled (bots.js feeds this from 'impact' events).
+  // Returns 'blocked' when the round was in fact stopped by the shield (bots.js then relabels the 'impact' event).
   hitAt(point, damage = 0, headshot = false) {
     if (this.ptSkip > 0) { this.ptSkip--; return; }
+    if (this.blockPend > 0) {
+      const amt = this.blockPend, fresh = this.blockT === this.mgr.time; this.blockPend = 0;
+      if (fresh) {
+        if (this.alive && point.y - this.pos.y < this.cfg.shieldFeet * this.height) { // under the shield: the feet
+          this.blocked--; this.mgr.stats.blocked--;
+          this.takeDamage(amt, { from: this.blockFrom, source: this.blockSrc, weapon: this.blockWeapon, shieldBypass: true, point }); this.ptSkip = Math.max(0, this.ptSkip - 1);
+          return;
+        }
+        this.blockFx(point, this.blockFrom, this.blockSrc);
+        return 'blocked';
+      }
+    }
     const zone = headshot ? 'head' : this.zoneOf(point), side = this.hitSide;
     if (!this.alive) { if (this.state === 'dead' && this.deadT < 0.05) this.mesh.deathHint(zone, side); return; }
     const str = Math.min(1.3, 0.35 + damage / 40) / Math.sqrt(Math.max(1, this.accN)) * (this.cfg.flinchScale || 1);
@@ -196,6 +273,10 @@ export class Bot {
     this.stagT = this.stagDur = dur; this.stagAmt = Math.min(1, 0.55 + 0.45 * strength) * Math.min(1, res + 0.25); this.stagImmT = dur + cfg.staggerImmunity; this.stagX = lx;
     this.staggerT = dur; // (legacy field written by hitreact.js)
     this.burstLeft = 0; this.pauseT = Math.max(this.pauseT, dur + 0.12); this.telling = false; this.tellT = 0;
+    if (this.special === 'shield') { this.shieldDownT = Math.max(this.shieldDownT, dur + cfg.shieldStaggerDrop); this.shieldUp = false; } // knocked aside: the opening
+    else if (this.special === 'rusher' && (this.rush.phase === 'windup' || this.rush.phase === 'lunge')) { this.rush.phase = 'recover'; this.rush.t = dur + 0.3; this.clearPath(); }
+    if (this.aimT > 0) this.cancelSnipe('hit');
+    this.grenWind = 0;
     this.flinchErr = Math.min(0.14, this.flinchErr + 0.06); this.firstBurst = this.firstBurst || strength > 0.9;
     const push = (2.2 + 3.2 * strength) * res; this.vel.x += d.x / l * push; this.vel.z += d.z / l * push;
     this.mesh.flinch(lx, lz, 0.9 + 0.5 * strength, this.hitSide, headshot ? 'head' : 'torso');
@@ -253,6 +334,7 @@ export class Bot {
     this.alive = false; this.state = 'dead'; this.deadT = 0; this.hp = 0; this.stats.deaths++;
     this.releaseToken(); this.clearPath(); this.evalJob = null; this.visible = false; this.target = null;
     this.stagT = 0; this.telling = false; this.duckT = 0; this.height = this.baseHeight;
+    this.aimT = 0; this.locked = false; this.grenWind = 0; this.shieldUp = false; if (mgr.roles) mgr.roles.laserOff(this);
     if (this.poi && this.poi.claimedBy === this) this.poi.claimedBy = null;
     this.mesh.die({ lx, lz, style, force, side, vel: this.vel, dirX: hd.x, dirZ: hd.z });
     this.deathStyle = style;
@@ -262,7 +344,7 @@ export class Bot {
     if (mgr.botDied) mgr.botDied(this, by);
   }
 
-  dispose() { this.alive = false; this.releaseToken(); this.clearPath(); this.mesh.dispose(); }
+  dispose() { this.alive = false; this.releaseToken(); this.clearPath(); if (this.mgr.roles) this.mgr.roles.release(this); this.mesh.dispose(); }
 
   // ===========================================================================
   // movement
@@ -370,7 +452,8 @@ export class Bot {
     if (this.sepX || this.sepZ) { // nudge away from allies / the player
       this.vel.x += this.sepX * 7 * dt; this.vel.z += this.sepZ * 7 * dt; this.sepX = 0; this.sepZ = 0;
     }
-    const pad = stepBody(b, this.ctx.world, dt, wx, wz, sp, 55, true, PAD_TRIGGER_R);
+    // (ground friction caps a body at accel / 8 m/s: 55 -> 6.9 m/s for everyone but the rusher, whose legs keep up with its speed)
+    const pad = stepBody(b, this.ctx.world, dt, wx, wz, sp, this.special === 'rusher' ? Math.max(55, sp * 8 + 25) : 55, true, PAD_TRIGGER_R);
     if (pad) {
       this.padFlight = true; this.stats.pads++; pad.pulse = 1;
       const link = this.nav.padLinks.find((l) => l.pad === pad);
@@ -426,8 +509,8 @@ export class Bot {
   // Staggered senses: the current target is checked every tick (chest, then head); other potential enemies in view
   // are checked a couple per tick in rotation, within the global per-frame ray budget. Then the best visible enemy is chosen.
   // ---- team mode (guards vs the player): awareness-based detection ----------
-  get leashed() { return this.role === 'passive'; }
-  inLeash(p) { return !this.leashed || Math.hypot(p.x - this.post.x, p.z - this.post.z) <= this.cfg.passiveLeash; }
+  get leashed() { return this.role === 'passive' || this.special === 'marksman'; }
+  inLeash(p) { return !this.leashed || Math.hypot(p.x - this.post.x, p.z - this.post.z) <= (this.special === 'marksman' ? this.cfg.perchLeash : this.cfg.passiveLeash); } // (a marksman stays on its perch)
 
   perceiveTeam() {
     const cfg = this.cfg, mgr = this.mgr, world = this.ctx.world, iv = cfg.perceptionInterval, now = mgr.time, pl = this.ctx.player;
@@ -539,6 +622,7 @@ export class Bot {
   // respond to a stimulus: 'go' = investigate the spot, 'peek' = a few steps toward it, 'watch' = turn and hold
   react(p, mode) {
     const cfg = this.cfg, d = this.pos.distanceTo(p);
+    if (this.special === 'marksman' && mode !== 'watch') mode = 'watch'; // a marksman does not leave its perch to look
     this.susActed = true;
     if (this.state === 'investigate' && (this.investMode === 'go' || mode !== 'go') && this.alertPos.distanceTo(p) < 8) { if (mode === 'go' && this.investMode === 'go') this.alertPos.copy(p); return; }
     const noise = mode === 'go' ? Math.min(4, d * 0.07) : 0;
@@ -720,7 +804,7 @@ export class Bot {
         this.waitT -= dt;
         if (this.waitT <= 0) {
           const s = this.lastSeen, r = 13;
-          if (!cfg.ffa && !this.inLeash(s)) { this.waitT = 1; break; } // passive guard too far from its post: stand and scan
+          if (!cfg.ffa && (!this.inLeash(s) || this.special === 'marksman')) { this.waitT = 1; break; } // passive guard too far from its post (and any marksman): stand and scan
           const id = this.nav.randomNode(s.x - r, s.x + r, s.z - r, s.z + r, s.y - 4.5, s.y + 4.5, 10);
           this.waitT = 0.4;
           if (id >= 0) {
@@ -737,7 +821,7 @@ export class Bot {
   // Send this guard to look for the intruder at `p` (heat system / late-raid hunting). It moves fast and searches
   // there, but still has to SEE the player to open fire: the detection rules are unchanged.
   huntTo(p, noise = 0) {
-    if (!this.alive || this.state === 'combat' || this.state === 'chase') return false;
+    if (!this.alive || this.state === 'combat' || this.state === 'chase' || this.special === 'marksman') return false;
     const cfg = this.cfg;
     this.alertPos.set(p.x + gauss() * noise, p.y, p.z + gauss() * noise);
     this.hunting = true; this.concernPl = true; this.huntCdT = this.mgr.time + rand(14, 24);
@@ -790,6 +874,9 @@ export class Bot {
     const cfg = this.cfg, mgr = this.mgr;
     this.lastCombatT = mgr.time;
     if (!this.target) { this.startSearch(); this.searchT = cfg.searchAfterKill; return; }
+    if (this.special === 'rusher') { this.thinkRush(dt); return; }
+    if (this.special === 'marksman' && this.visible && !this.underFire && this.hp >= cfg.retreatHp) this.reposT = Math.max(this.reposT, 0.5); // holds its perch while it has the shot
+    if (this.aimT > 0 || this.grenWind > 0) { this.reposT = Math.max(this.reposT, 0.25); this.modeT = Math.max(this.modeT, 0.25); if (this.path && this.aimT > 0) this.clearPath(); } // stands still to aim / throw
     this.modeT -= dt; this.reposT -= dt;
     this.lookPt.copy(this.lastSeen); this.lookPt.y += 1.15;
     const hurt = this.hp < cfg.retreatHp;
@@ -804,14 +891,14 @@ export class Bot {
       if (this.defensive && this.hp > cfg.retreatHp + 25) this.defensive = false;
       if (this.unseenT > cfg.loseSightTime * (1 - 0.4 * mgr.aggr)) { // lost them: go and look
         mgr.callout(this, 'lost');
-        if (!cfg.ffa && !this.inLeash(this.lastSeen)) { this.releaseToken(); this.evalJob = null; this.startSearch(); return; } // passive: hold and watch
+        if (!cfg.ffa && (!this.inLeash(this.lastSeen) || this.special === 'marksman')) { this.releaseToken(); this.evalJob = null; this.startSearch(); return; } // passive: hold and watch
         this.releaseToken(); this.state = 'chase'; this.evalJob = null;
         TMP3.copy(this.lastSeen).addScaledVector(this.lastSeenVel, 0.4);
         const done = () => this.startSearch();
         this.moveTo(TMP3, cfg.sprintSpeed, { onArrive: done, onFail: done });
         return;
       }
-      const wantCover = (hurt && this.modeT <= 0) || this.reloadT > 0.4 && !this.reloadCover;
+      const wantCover = !cfg.noCover && ((hurt && this.modeT <= 0) || this.reloadT > 0.4 && !this.reloadCover);
       if (this.stagT > 0) { /* reeling: no decisions */ }
       else if (wantCover && !this.evalJob) {
         if (this.reloadT > 0) { this.reloadCover = true; mgr.callout(this, 'reloading'); }
@@ -824,9 +911,10 @@ export class Bot {
         let kind = this.unseenT > 0.7 || far ? 'push' : 'engage'; // too far to hit much: close in
         if (this.underFire) { // being shot at in the open: break for cover, or at least sidestep
           this.underFire = false;
-          if (Math.random() < cfg.underFireCover + (1 - this.hp / this.maxHp) * 0.4) {
+          if (!cfg.noCover && Math.random() < cfg.underFireCover + (1 - this.hp / this.maxHp) * 0.4) {
             kind = 'cover'; this.mode = 'cover'; this.modeT = 4; this.coverT = randR(cfg.coverTime) * 0.6; this.releaseToken(); mgr.callout(this, 'cover');
-          } else { kind = 'dodge'; this.reposT = rand(0.7, 1.3); }
+          } else if (cfg.noCover) kind = far ? 'push' : 'engage'; // shield / heavy: keeps coming
+          else { kind = 'dodge'; this.reposT = rand(0.7, 1.3); }
         } else if (!hurt && !this.leashed && mgr.time > this.flankCdT && mgr.campT > cfg.campTime * (1 - 0.6 * g) && mgr.flankers() < 1 + Math.round(g * 2)) {
           // the player has settled in one spot: someone goes round the side, or straight at them
           kind = Math.random() < cfg.flankShare ? 'flank' : 'push';
@@ -841,13 +929,148 @@ export class Bot {
     // firing slot
     this.tokenCd -= dt;
     const want = this.mode !== 'cover' && this.visible && this.inRange !== false && this.reactT <= 0 && this.reloadT <= 0 && this.tokenCd <= 0;
-    if (cfg.ffa || this.target !== this.ctx.player) { if (!cfg.ffa) this.pool.delete(this); this.hasToken = this.mode !== 'cover'; return; } // free-for-all / bot against bot: no shared firing slots
+    if (cfg.ffa || this.target !== this.ctx.player || this.special === 'marksman') { if (!cfg.ffa) this.pool.delete(this); this.hasToken = this.mode !== 'cover'; return; } // free-for-all / bot against bot / the marksman's single rounds: no shared firing slots
     if (want && !this.hasToken) { this.wantTokenT = mgr.time; if (this.pool.size < cfg.maxAttackers + (mgr.aggr >= 0.75 && this.faction === 'guard' ? 1 : 0)) { this.pool.add(this); this.hasToken = true; this.tokenT = randR(cfg.attackHoldTime); } }
     if (this.hasToken) {
       this.tokenT -= dt;
       if (this.unseenT > 0.9 || this.mode === 'cover') this.releaseToken();
       else if (this.tokenT <= 0 && this.burstLeft <= 0 && mgr.someoneWaiting(this)) { this.releaseToken(); this.tokenCd = rand(1.2, 2.2); }
     }
+  }
+
+  // ---- the rusher: no gun, no cover. run (zigzag) -> windup (the tell) -> lunge (a straight, committed line) -> recover
+  thinkRush(dt) {
+    const cfg = this.cfg, mgr = this.mgr, T = this.target, R = this.rush, p = this.pos;
+    this.releaseToken(); this.evalJob = null; this.lookMove = false;
+    this.lookPt.copy(this.lastSeen); this.lookPt.y += 1.0;
+    const tp = this.visible ? T.pos : this.lastSeen, dx = tp.x - p.x, dz = tp.z - p.z, d = Math.hypot(dx, dz) || 1e-3, dy = tp.y - p.y;
+    if (R.phase === 'run') {
+      if ((this.unseenT > cfg.loseSightTime * 1.6 && d < 2.5) || this.unseenT > 8) { this.startSearch(); mgr.callout(this, 'lost'); return; } // reached where they were: nobody there
+      if (this.stagT > 0) return;
+      if (this.reactT > 0) { if (this.visible) this.reactT -= dt; return; }
+      if (this.visible && d < cfg.chargeRange && Math.abs(dy) < 2.2) { // close enough: wind up (crouch, arms wide, glow) — the fair warning
+        R.phase = 'windup'; R.t = cfg.chargeWindup; this.clearPath(); this.telling = true;
+        this.ctx.events.emit('botTell', { bot: this, time: cfg.chargeWindup, kind: this.kind, attack: 'charge' });
+        mgr.callout(this, 'push');
+        return;
+      }
+      R.repT -= dt; R.zigT -= dt;
+      if (R.zigT <= 0) { R.zig = -R.zig; R.zigT = rand(0.4, 0.8); R.repT = 0; }
+      if (R.repT <= 0 || !this.moving) { // erratic approach: aim to one side of the target, then the other
+        R.repT = 0.45;
+        const off = d > cfg.chargeRange + 3 ? Math.min(cfg.zigzag, d * 0.25) * R.zig : 0;
+        const gx = tp.x + (dz / d) * off, gz = tp.z - (dx / d) * off;
+        let id = this.nav.nearestNode(gx, tp.y, gz, 2, 1.6, true); if (id < 0) id = this.nav.nearestNode(tp.x, tp.y, tp.z, 4, 2.5, true);
+        if (id >= 0) this.moveTo(this.nav.nodePos(id, TMP3), cfg.sprintSpeed, { goalId: id });
+      }
+    } else if (R.phase === 'windup') {
+      R.t -= dt; this.telling = true;
+      if (R.t <= 0) {
+        this.telling = false;
+        const tv = T.vel || ZERO, lx = T.pos.x + tv.x * 0.12 - p.x, lz = T.pos.z + tv.z * 0.12 - p.z, l = Math.hypot(lx, lz) || 1;
+        R.dx = lx / l; R.dz = lz / l; R.phase = 'lunge'; R.t = cfg.lungeTime; R.hit = false;
+        const reach = cfg.lungeSpeed * cfg.lungeTime + 1.5;
+        this.clearPath(); this.moveSpeed = cfg.lungeSpeed; this.goal.set(p.x + R.dx * reach, p.y, p.z + R.dz * reach); this.goalId = -1; this.stuckN = 0; this.stuckT = 0; this.stuckPos.copy(p);
+        this.setPath([{ x: p.x, y: p.y, z: p.z, t: 0, pad: null }, { x: this.goal.x, y: p.y, z: this.goal.z, t: 0, pad: null }]);
+        this.aimYaw = Math.atan2(R.dx, R.dz);
+      }
+    } else if (R.phase === 'lunge') {
+      R.t -= dt;
+      if (!R.hit && T.alive && Math.hypot(T.pos.x - p.x, T.pos.z - p.z) < cfg.meleeRange + (T.radius || 0.35) - 0.35 && Math.abs(T.pos.y - p.y) < 1.7) { R.hit = true; this.melee(T); }
+      if (R.t <= 0 || R.hit || !this.path) { R.phase = 'recover'; R.t = cfg.meleeRecover; this.clearPath(); }
+    } else { R.t -= dt; if (R.t <= 0) { R.phase = 'run'; R.repT = 0; } } // spent: stands there for a moment — the opening
+  }
+  melee(T) {
+    const cfg = this.cfg, ev = this.ctx.events, R = this.rush;
+    const dmg = cfg.meleeDamage * (T.isBot ? cfg.botVsBotDamage : 1), from = new THREE.Vector3(this.pos.x, this.pos.y + 1.1, this.pos.z);
+    const point = new THREE.Vector3(T.pos.x - R.dx * 0.3, T.pos.y + tH(T) * 0.6, T.pos.z - R.dz * 0.3);
+    this.stats.shots++; this.stats.hits++; this.stats.damageDealt += dmg; this.mesh.fireKick();
+    if (T.vel && T.vel.isVector3) { T.vel.x += R.dx * 4; T.vel.z += R.dz * 4; }
+    this.vel.x = -R.dx * 7; this.vel.z = -R.dz * 7; // it rebounds off its victim: there is daylight between them again
+    T.takeDamage(dmg, { from, source: this, weapon: 'bot_shock' });
+    ev.emit('impact', { point, normal: new THREE.Vector3(-R.dx, 0, -R.dz), kind: 'flesh', target: T, damage: dmg, by: this, melee: true });
+    ev.emit('rusherHit', { bot: this, target: T, damage: dmg, point });
+  }
+
+  // ---- the marksman: a laser held on the target, then one round ---------------------------------------------
+  cancelSnipe(reason) {
+    if (!(this.aimT > 0)) return;
+    this.aimT = 0; this.locked = false; this.telling = false; this.snipeCd = Math.max(this.snipeCd, reason === 'hit' ? 1.6 : 1.0);
+    this.mgr.roles.laserOff(this); this.stats.snipeCancel = (this.stats.snipeCancel || 0) + 1;
+    this.ctx.events.emit('marksmanAim', { bot: this, time: 0, phase: 'cancel', reason });
+  }
+  fireSnipe(dt) {
+    const cfg = this.cfg, mgr = this.mgr, ctx = this.ctx, T = this.target, ev = ctx.events;
+    if (this.reactT > 0 && this.visible) this.reactT -= dt;
+    if (this.snipeCd > 0) this.snipeCd -= dt;
+    const live = this.state === 'combat' && T && T.alive && this.stagT <= 0 && !this.far;
+    this.inRange = !!T && this.pos.distanceTo(this.visible ? T.pos : this.lastSeen) <= cfg.engageRange;
+    if (this.aimT > 0) {
+      if (!live || !this.inRange) { this.cancelSnipe('lost'); return; }
+      const M = TMP.set(this.pos.x, this.pos.y + EYE * (this.baseHeight / 1.8), this.pos.z), h = tH(T);
+      if (!this.locked) { // the line follows the target; breaking line of sight now calls the shot off
+        this.lockPt.set(T.pos.x, T.pos.y + h * 0.6, T.pos.z);
+        let los = ctx.world.lineOfSight(M, this.lockPt); mgr.stats.rays++;
+        if (!los) { TMP2.set(T.pos.x, T.pos.y + h - 0.12, T.pos.z); los = ctx.world.lineOfSight(M, TMP2); mgr.stats.rays++; }
+        if (los) this.losLostT = 0; else if ((this.losLostT += dt) > cfg.snipeLosGrace) { this.cancelSnipe('los'); return; }
+      }
+      this.aimT -= dt; this.telling = true;
+      if (!this.locked && this.aimT <= cfg.lockTime) { // frozen: where the target will be if it keeps going (partly led)
+        this.locked = true; const tv = T.vel || ZERO, k = cfg.lockTime * cfg.snipeLead;
+        this.lockPt.set(T.pos.x + tv.x * k, T.pos.y + h * 0.6, T.pos.z + tv.z * k);
+        ev.emit('marksmanAim', { bot: this, time: Math.max(0, this.aimT), phase: 'lock' });
+      }
+      if (this.aimT > 0) { mgr.roles.laser(this, M, this.lockPt, 1 - this.aimT / cfg.aimTime, this.locked); return; }
+      // the shot
+      this.aimT = 0; this.locked = false; this.telling = false; this.snipeCd = randR(cfg.snipeCooldown); mgr.roles.laserOff(this);
+      const origin = M.clone(), dir = this.lockPt.clone().sub(origin).normalize(), hit = ctx.hitscan(origin, dir, cfg.maxRange, this);
+      this.stats.shots++; mgr.stats.shots++; this.mesh.fireKick(); this.recoil += 0.03;
+      ev.emit('shot', { weapon: 'bot_marksman', origin, dir, dirs: [dir], muzzle: origin.clone().addScaledVector(dir, 1.3), by: this, end: hit ? hit.point : origin.clone().addScaledVector(dir, cfg.maxRange), heavy: true });
+      if (hit && hit.type === 'target') {
+        const t = hit.target, dmg = cfg.snipeDamage * (t.isBot ? 2 : 1);
+        this.stats.hits++; this.stats.damageDealt += dmg; mgr.stats.hits++;
+        t.takeDamage(dmg, { from: origin, source: this, weapon: 'bot_marksman' });
+        ev.emit('impact', { point: hit.point, normal: hit.normal, kind: 'flesh', target: t, damage: dmg, by: this });
+      } else if (hit) {
+        if (ctx.destruction && ctx.destruction.hit) ctx.destruction.hit(hit.collider, hit.point, hit.normal, cfg.snipeDamage);
+        ev.emit('impact', { point: hit.point, normal: hit.normal, kind: 'world', collider: hit.collider, damage: cfg.snipeDamage, by: this });
+      }
+      return;
+    }
+    if (live && this.inRange && this.visible && this.reactT <= 0 && this.snipeCd <= 0 && this.mode !== 'cover' && this.aimOff < 0.25) {
+      this.aimT = cfg.aimTime; this.locked = false; this.losLostT = 0; this.telling = true; this.clearPath(); this.evalJob = null;
+      this.lockPt.set(T.pos.x, T.pos.y + tH(T) * 0.6, T.pos.z);
+      ev.emit('botTell', { bot: this, time: cfg.aimTime, kind: this.kind, attack: 'snipe' });
+      ev.emit('marksmanAim', { bot: this, time: cfg.aimTime, phase: 'aim' });
+    }
+  }
+
+  // ---- the grenadier: flush out a target that hides or stays put. Returns true while it is busy throwing. ------
+  grenadeTick(dt) {
+    const cfg = this.cfg, mgr = this.mgr, T = this.target;
+    if (this.grenCd > 0) this.grenCd -= dt;
+    if (this.grenWind > 0) {
+      if (this.stagT > 0 || this.state !== 'combat') { this.grenWind = 0; this.telling = false; this.grenCd = 2; return false; }
+      this.grenWind -= dt; this.burstLeft = 0; this.telling = true;
+      if (this.grenWind <= 0) {
+        this.telling = false; this.grenWind = 0;
+        this.grenCd = mgr.roles.throwGrenade(this, this.grenAim) ? randR(cfg.grenadeCooldown) : 2;
+        this.pauseT = Math.max(this.pauseT, 0.7); this.stats.grenades = (this.stats.grenades || 0) + 1;
+      }
+      return true;
+    }
+    if (this.grenCd > 0 || this.state !== 'combat' || !T || !T.alive || this.stagT > 0 || this.far || this.reactT > 0) return false;
+    const src = this.visible ? T.pos : this.lastSeen, d = Math.hypot(src.x - this.pos.x, src.z - this.pos.z);
+    if (d < cfg.grenadeRange[0] || d > cfg.grenadeRange[1]) return false;
+    const hiding = !this.visible && this.unseenT > cfg.grenadeAfterUnseen && mgr.time - this.lastSeenTime < 6;
+    const camping = this.visible && (T === this.ctx.player ? mgr.campT > cfg.grenadeCamp : Math.hypot(T.vel ? T.vel.x : 0, T.vel ? T.vel.z : 0) < 1);
+    if (!hiding && !camping) return false;
+    this.grenAim.set(src.x + gauss() * cfg.grenadeError, src.y + 0.1, src.z + gauss() * cfg.grenadeError);
+    if (!mgr.roles.canThrow(this, this.grenAim)) { this.grenCd = 1.2; return false; }
+    this.grenWind = cfg.grenadeWindup; this.telling = true; this.burstLeft = 0; this.unseenT = Math.min(this.unseenT, 1); // (it does not run off after them in the middle of the throw)
+    this.ctx.events.emit('botTell', { bot: this, time: cfg.grenadeWindup, kind: this.kind, attack: 'grenade' });
+    mgr.callout(this, 'grenade');
+    return true;
   }
 
   get pool() { return this.faction === 'raider' ? this.mgr.raidAttackers : this.mgr.attackers; } // firing slots against the player, per faction
@@ -960,11 +1183,14 @@ export class Bot {
     const cp = Math.cos(this.aimPitch + this.recoil);
     this.aimDir.set(Math.sin(this.aimYaw) * cp, Math.sin(this.aimPitch + this.recoil), Math.cos(this.aimYaw) * cp);
     // in a fight the carbine sits at low ready and only comes up to the shoulder for the tell and the burst
-    this.aimingPose = combat ? (this.lookMove ? 0.25 : this.telling || this.burstLeft > 0 ? 1 : cfg.lowReady) : this.state === 'patrol' ? 0 : 0.55;
+    this.aimingPose = combat ? (this.lookMove ? 0.25 : this.telling || this.burstLeft > 0 || this.aimT > 0 ? 1 : this.special === 'shield' ? 0.3 : cfg.lowReady) : this.state === 'patrol' ? 0 : this.special === 'shield' ? 0.2 : 0.55;
   }
 
   fire(dt) {
-    const cfg = this.cfg;
+    const cfg = this.cfg, sp = this.special;
+    if (sp === 'rusher') { this.burstLeft = 0; return; }
+    if (sp === 'marksman') { this.fireSnipe(dt); return; }
+    if (sp === 'grenadier' && this.grenadeTick(dt)) return;
     if (this.reloadT > 0) { this.reloadT -= dt; if (this.reloadT <= 0) { this.mag = cfg.magSize; this.reloadCover = false; } }
     if (this.reactT > 0 && this.visible) this.reactT -= dt;
     const tp = this.visible && this.target ? this.target.pos : this.lastSeen;
@@ -976,14 +1202,14 @@ export class Bot {
       if (!this.telling) {
         if (this.pauseT > cfg.tellTime) { this.pauseT -= dt; return; }
         this.telling = true; this.tellT = cfg.tellTime;
-        this.ctx.events.emit('botTell', { bot: this, time: cfg.tellTime, kind: this.kind });
+        this.ctx.events.emit('botTell', { bot: this, time: cfg.tellTime, kind: this.kind, attack: sp === 'suppressor' ? 'spool' : 'burst' });
       }
       this.pauseT -= dt; this.tellT -= dt;
       if (this.tellT > 0 || this.pauseT > 0) return;
       this.telling = false; this.burstLeft = randI(cfg.burst); this.shotT = 0;
     } else if (this.pauseT > 0) { this.pauseT -= dt; return; }
     this.shotT -= dt;
-    if (this.shotT > 0 || this.aimOff > 0.1) return;
+    if (this.shotT > 0 || (this.aimOff > 0.1 && sp !== 'suppressor')) return; // (the machine gun keeps firing down its lane while it swings round)
     this.shotT = Math.max(this.shotT, -0.02) + 1 / cfg.fireRate;
     if (!this.shoot()) { this.burstLeft = 0; this.pauseT = 0.35; this.reposT = 0; return; }
     this.burstLeft--; this.mag--;
@@ -1028,7 +1254,7 @@ export class Bot {
       if (hitRoll) { const dmg = cfg.damage * cfg.botVsBotDamage; this.stats.hits++; this.stats.damageDealt += dmg; this.mgr.stats.hits++; pl.takeDamage(dmg, { from: origin, source: this }); }
       return true;
     }
-    if (this.visible && pl && pl.alive) {
+    if (this.visible && pl && pl.alive && this.special !== 'suppressor') {
       // explicit model: decide hit / miss first, then aim the round accordingly
       const dx = pl.pos.x - origin.x, dz = pl.pos.z - origin.z, dh = Math.hypot(dx, dz) || 1e-3, px = dz / dh, pz = -dx / dh; // (px, pz): sideways
       const tv = pl.vel || ZERO, lat = tv.x * px + tv.z * pz, h = tH(pl);
@@ -1046,7 +1272,8 @@ export class Bot {
       }
       dir = tgt.sub(origin).normalize().clone();
     } else {
-      // blind fire at the last known position: cone around the simulated aim direction
+      // blind fire at the last known position — and every round of the heavy's machine gun: a cone around the simulated
+      // aim direction, so its fire is a lane that can be stepped out of
       dir = this.aimDir.clone();
       const r = cfg.spread * Math.sqrt(Math.random()), th = Math.random() * Math.PI * 2;
       TMP.set(Math.cos(this.aimYaw), 0, -Math.sin(this.aimYaw));            // right-ish
@@ -1054,13 +1281,13 @@ export class Bot {
       dir.addScaledVector(TMP, Math.cos(th) * r).addScaledVector(TMP2, Math.sin(th) * r).normalize();
     }
     const hit = ctx.hitscan(origin, dir, cfg.maxRange, this);
-    if (!cfg.ffa && hit && hit.type === 'target' && hit.target !== pl && hit.target.team === this.team && (hit.target.faction || 'guard') === this.faction) return false; // an ally is in the line of fire: hold
+    if (!cfg.ffa && hit && hit.type === 'target' && hit.target !== pl && hit.target.team === this.team && (hit.target.faction || 'guard') === this.faction) return this.special === 'suppressor'; // an ally is in the line of fire: hold (the machine gun only skips the round: its burst, once spooled, goes on)
     // muzzle of the carbine (for tracers / flashes drawn by the fx system)
     const sy = Math.sin(this.aimYaw), cy = Math.cos(this.aimYaw);
     const muzzle = new THREE.Vector3(this.pos.x - cy * 0.1, this.pos.y + 1.43, this.pos.z + sy * 0.1).addScaledVector(this.aimDir, 0.9);
     this.stats.shots++; this.mgr.stats.shots++;
     this.recoil += cfg.recoilPerShot; this.mesh.fireKick();
-    ev.emit('shot', { weapon: 'bot_rifle', origin, dir, dirs: [dir], muzzle, by: this, end: hit ? hit.point : origin.clone().addScaledVector(dir, cfg.maxRange) });
+    ev.emit('shot', { weapon: this.special === 'suppressor' ? 'bot_lmg' : this.special === 'shield' ? 'bot_pistol' : 'bot_rifle', origin, dir, dirs: [dir], muzzle, by: this, end: hit ? hit.point : origin.clone().addScaledVector(dir, cfg.maxRange) });
     if (!hit) return true;
     if (hit.type === 'target') {
       const t = hit.target, dmg = cfg.damage * (hit.headshot ? cfg.headshotMult : 1) * (t.isBot ? cfg.botVsBotDamage : 1);
@@ -1097,6 +1324,11 @@ export class Bot {
     if (this.hurtT > cfg.regenDelay && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + cfg.regenRate * dt);
     if (this.visible) { if (this.unseenT > 1.5) this.firstBurst = true; this.seenT += dt; this.unseenT = 0; this.settle += dt; } else { this.seenT = 0; this.unseenT += dt; this.settle = Math.max(0, this.settle - dt * 0.6); }
 
+    if (this.special === 'shield') { // up whenever it is on guard, except while firing (and a moment after) or reeling
+      if (this.shieldDownT > 0) this.shieldDownT -= dt;
+      if (this.telling || this.burstLeft > 0) this.shieldDownT = Math.max(this.shieldDownT, cfg.shieldDropAfter);
+      this.shieldUp = this.shieldDownT <= 0 && this.stagT <= 0 && this.state !== 'patrol';
+    }
     const T0 = this.target;
     if (T0 && T0.isBot && (!T0.alive || T0.faction === this.faction)) this.loseTarget(true); // the bot I was fighting is down / gone
     this.percT -= dt;
@@ -1127,6 +1359,10 @@ export class Bot {
     // ducked: suppressed, or sitting out a reload / a breather behind cover
     a.crouch = this.duckT > 0 ? 1 : this.state === 'combat' && this.mode === 'cover' && !this.moving && !this.evalJob && !this.visible ? 0.75 : this.state === 'patrol' && this.lootUntil > this.mgr.time && !this.moving ? 0.85 : 0;
     a.tell = this.telling ? 1 : 0; a.limp = this.slowT > 0 ? 1 : 0;
+    const sp = this.special;
+    a.shield = this.shieldUp ? 1 : 0; a.spin = sp === 'suppressor' && (this.telling || this.burstLeft > 0) ? 1 : 0; a.throw = this.grenWind > 0 ? 1 : 0; a.claw = 0;
+    if (sp === 'rusher') { const ph = this.rush.phase, cb = this.state === 'combat'; a.claw = cb && ph === 'lunge' ? 1 : 0; if (cb && ph === 'windup') a.crouch = 0.9; else if (cb && ph === 'recover') { a.crouch = 0.45; a.stag = Math.max(a.stag, 0.5); } }
+    else if (sp === 'shield' && this.shieldUp) a.crouch = Math.max(a.crouch, 0.22); // hunkered behind it
     this.mesh.update(dt, a);
     this.height = this.baseHeight * (1 - 0.2 * this.mesh.crouch); // the hit box ducks with the body
   }

@@ -293,7 +293,6 @@ export function init(ctx) {
       const b = world.buildings.find((q) => q.threat && Math.abs(L.pos.x - q.x) < q.w / 2 && Math.abs(L.pos.z - q.z) < q.d / 2); if (!b) continue;
       const p = THREAT[b.threat].luck; L.items = L.items.map((it) => (it.tier === 'common' && Math.random() < p ? rollItem(4) : it));
     }
-    for (const b of world.buildings) if (b.threat === 'critical') (kindsDue || (kindsDue = [])).push([b, 'heavy']); // critical sites get a heavy as well
     // vault cases are locked: one keycard is hidden in a secure crate (heavies and marksmen sometimes carry one too)
     const secure = lootables.filter((L) => L.kind === 'secure');
     if (secure.length) secure[Math.floor(Math.random() * secure.length)].items.push({ supply: 'key', name: 'Keycard' });
@@ -528,7 +527,7 @@ export function init(ctx) {
     }
     // tougher enemy types carry better loot
     if (e.by !== player && !(e.bot && e.bot.kind === 'raider') && !(e.bot && e.bot.hvt) && Math.hypot(e.point.x - player.pos.x, e.point.z - player.pos.z) > 60) return; // far-off guard deaths leave nothing
-    const rich = e.bot && (e.bot.kind === 'heavy' || e.bot.kind === 'marksman');
+    const rich = e.bot && (e.bot.kind === 'heavy' || e.bot.kind === 'marksman' || e.bot.kind === 'shield' || e.bot.kind === 'grenadier');
     const commander = e.bot && e.bot.hvt, raider = e.bot && e.bot.kind === 'raider';
     const L = addLootable('bag', e.point.x + rnd(-0.4, 0.4), floorBelow(e.point.x, e.point.y, e.point.z), e.point.z + rnd(-0.4, 0.4), Math.random() * 3);
     if (commander) { L.items = rollContents('vault'); L.items.push({ supply: 'key', name: 'Keycard' }, prizeGun()); L.born = ctx.time + 400; }

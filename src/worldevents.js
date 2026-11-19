@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // ctx.worldEvents = { marks } — marks are { x, z, title, css, active } and are drawn by the compass and the map.
 
 const DROP = { times: [[110, 170], [380, 450]], fall: 14, height: 90, minDist: 45, maxDist: 110 };
-const HVT = { at: 45, hpMul: 3.5, markEvery: 8 }; // a mini-boss: three and a half times the health of whoever was picked
+const HVT = { at: 45, hpMul: 2.2, markEvery: 8 }; // a mini-boss: more than twice the health of whoever was picked (a heavy is already plated at the front)
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export function init(ctx) {

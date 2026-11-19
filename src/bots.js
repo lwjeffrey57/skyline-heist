@@ -3,6 +3,7 @@ import { CONFIG, rand } from './bots/config.js';
 import { Nav } from './bots/nav.js';
 import { Bot } from './bots/bot.js';
 import { createSquads } from './bots/squads.js';
+import { createRoles } from './bots/roles.js';
 
 // =============================================================================
 // Bots system. Contract: init(ctx) -> { update(dt) }   (see core.js)
@@ -13,6 +14,33 @@ import { createSquads } from './bots/squads.js';
 //   src/bots/body.js     the android mesh + procedural animation
 //   src/bots/bot.js      one bot: movement, senses, state machine, aim, fire
 //   src/bots/squads.js   guard posts and 2-man patrols, rival raider squads (who stands / walks / loots where)
+//   src/bots/roles.js    pooled visuals + simulation of the enemy types' special attacks (laser, grenades)
+//
+// ENEMY TYPES (bot.kind / bot.special; numbers and the meaning of every key: config.js `kinds`). Each asks for a
+// different answer and has its own silhouette and glow colour:
+//   grunt     'Guard'      orange  the plain rifleman.
+//   shield    'Shield'     blue    tall frontal shield stops bullets; advances slowly with a sidearm. Flank / dash past
+//                                  it, shoot its feet, shoot from above, use a blast, or hit it while it fires (shield aside).
+//   scout     'Rusher'     pink    small, hunched, no gun: sprints in, winds up (tell), lunges in a straight line for a
+//                                  melee shock. Kill it first or sidestep / dash the lunge.
+//   marksman  'Marksman'   yellow  far and high; a visible laser for config aimTime, then one heavy round. Break line of
+//                                  sight or hit it during the wind-up to cancel.
+//   grenadier 'Grenadier'  green   lobs slow grenades with a landing marker at a target that hides or stays put. Move; push it.
+//   heavy     'Heavy'      red     walking machine-gunner: spools up (tell), then a long cone of fire down its lane; turns
+//                                  slowly; double damage from behind.
+//   ctx.bots.config.kinds[k].weight / .max set the mix of (re)spawning guards (see config.js) — change them with heat.
+// Type events (besides the general ones below):
+//   botTell       { bot, time, kind, attack:'burst'|'spool'|'charge'|'snipe'|'grenade' }   every dangerous attack is announced
+//   marksmanAim   { bot, time, phase:'aim'|'lock'|'cancel', reason?:'los'|'hit'|'lost' }   laser on (time = s until the shot),
+//                 line frozen (the shot follows in `time` s), called off
+//   enemyGrenade  { point, fuse, by, radius, phase:'throw'|'land', from? }                  see roles.js
+//   explosion     { point, radius, by, damage, kind:'enemyGrenade' }
+//   rusherHit     { bot, target, damage, point }                                            a lunge connected
+//   impact        { kind:'shield', blocked:true, point, normal, target, by, damage:0 }      a round stopped by a shield. The
+//                 shooter's own 'impact' { kind:'flesh' } for that round is relabelled kind:'shield', damage 0 for the
+//                 listeners that run after the bots system; Bot.takeDamage() returns 'blocked' for such a round.
+// Per bot: special, shieldUp, blocked (rounds stopped), rush.phase ('run'|'windup'|'lunge'|'recover'), aimT (> 0: laser on),
+//   locked, grenWind (> 0: about to throw). botDamaged carries weak:true for a hit on the heavy's back.
 //
 // FACTIONS (team mode, config.ffa = false). bot.faction: 'guard' | 'raider'. Guards and raiders fight each other and
 //   both fight the player; both use the same awareness rules toward the player (awareness, alertState: detect HUD).
@@ -25,7 +53,8 @@ import { createSquads } from './bots/squads.js';
 //              alertAll(pos), respawnAll()  guards back to their posts; raiders cleared and config.raiders.squads new
 //                squads scheduled to walk in from the map edge (far from the player) within config.raiders.enterDelay,
 //              spawnRaiders(n?, nearPos?) -> [bots]   send a squad in now, clearRaiders(),
-//              setAggression(level 0..1), aggression (getter), hunt(pos, n) -> number of guards sent }
+//              setAggression(level 0..1), aggression (getter), hunt(pos, n) -> number of guards sent,
+//              grenades (the grenadiers' live grenades, see roles.js: for HUD warnings) }
 // Raiders are removed automatically when ctx.raid.state leaves 'raid'. They do not respawn.
 // Events emitted: shot (far: true when resolved without a ray, see below), impact, botSpawned, guardSuspicious, guardAlert,
 //   raiderSuspicious / raiderAlert { bot }   the same transitions for a raider noticing the PLAYER (guard* stay guards-only)
@@ -46,7 +75,7 @@ import { createSquads } from './bots/squads.js';
 //   botSuppressed{ bot, level }                                         near misses made a guard duck
 //   botTell      { bot, time:seconds until the first round, kind }      a guard raised its weapon to fire a burst
 //   botCallout   { bot, kind }   bark cue, rate-limited. kind: 'contact'|'hit'|'wounded'|'suppressed'|'cover'|'reloading'|
-//                                'flank'|'push'|'lost'|'hunt'|'manDown'
+//                                'flank'|'push'|'lost'|'hunt'|'manDown'|'grenade' (a grenadier is about to throw)
 // Per bot (read-only for others): stagT (s of stagger left), slowT (limping), duckT, suppression (0..1.5), telling,
 //   defensive, hunting, deathStyle; methods stagger(strength, dir?, headshot?, point?), suppress(n), huntTo(pos, noise).
 // Team mode (config.ffa = false): each bot exposes role, post, awareness, alertState, lastSeenPlayerT.
@@ -106,6 +135,7 @@ export function init(ctx) {
     },
     poiVisited(p, bot) { p.visits++; p.fails = 0; p.lastVisit = mgr.time; if (p.claimedBy === bot) p.claimedBy = null; },
   };
+  const roles = mgr.roles = createRoles(mgr);
   const squads = createSquads(mgr);
   mgr.squadGoal = squads.goal; mgr.botDied = squads.botDied;
 
@@ -157,16 +187,30 @@ export function init(ctx) {
   }
 
   // roles: keep the passive share of the LIVING guards at config.passiveShare
-  // enemy type: weighted roll among the kinds that are not at their cap; a kind may force the role
+  // Enemy type: the type that is furthest below its share (weight / sum of weights) of the living guards, among those
+  // not at their cap. A squad slot may ask for a type (squads.js: shield at a gate, marksman on a rampart, ...); posted
+  // guards are never rushers, patrols never marksmen. While a raid's plan is fresh the armoury / watch slots stay grunts
+  // and no heavy is rolled: raid.js converts the guards there itself.
   function assignKind(bot) {
     const kinds = cfg.kinds || {};
     if (cfg.ffa || !kinds.grunt) { bot.setKind('grunt'); return; }
-    const alive = {}; for (const b of mgr.guards) if (b !== bot && b.alive) alive[b.kind] = (alive[b.kind] || 0) + 1;
-    const post = !!(bot.slot && bot.slot.squad.type === 'post'), squad = !!bot.slot; // posted guards: no scouts; patrols: no marksman
-    const open = Object.keys(kinds).filter((k) => !(kinds[k].max && (alive[k] || 0) >= kinds[k].max) && !(post && k === 'scout') && !(squad && !post && kinds[k].role === 'passive'));
-    let total = 0; for (const k of open) total += kinds[k].weight || 1;
-    let r = Math.random() * total, pickK = 'grunt';
-    for (const k of open) { r -= kinds[k].weight || 1; if (r <= 0) { pickK = k; break; } }
+    const alive = {}; let n = 0; for (const b of mgr.guards) if (b !== bot && b.alive) { alive[b.kind] = (alive[b.kind] || 0) + 1; n++; }
+    const slot = bot.slot, post = !!(slot && slot.squad.type === 'post'), fresh = squads.planFresh() && !!ctx.raid;
+    let total = 0; for (const k in kinds) total += kinds[k].weight || 0;
+    let pickK = 'grunt', best = -1e9;
+    for (const k in kinds) {
+      const K = kinds[k];
+      if (k !== 'grunt' && K.max && (alive[k] || 0) >= K.max) continue;
+      if ((post && K.set && K.set.special === 'rusher') || (slot && !post && K.role === 'passive')) continue;
+      if (fresh && (k === 'heavy' || (k === 'marksman' && (alive[k] || 0) >= (K.max || 9) - 1))) continue; // (raid.js adds the armoury heavy and the watch-post marksman)
+      if (K.role === 'passive' && slot && slot.kind !== k) continue; // a marksman only where there is a perch for one
+      let sc = (K.weight || 0) / (total || 1) * (n + 1) - (alive[k] || 0) + Math.random() * 0.3;
+      if (!(K.weight > 0) && !(slot && slot.kind === k)) continue;
+      if (slot && slot.kind === k && !(fresh && slot.late)) sc += k === 'grunt' ? 0.5 : 3; // (a soft preference for grunts: the weights still win when they are shifted)
+      if (slot && slot.kind && slot.kind !== k && k !== 'grunt') sc -= 0.6; // a slot made for another type: rather a grunt
+      if (sc > best) { best = sc; pickK = k; }
+    }
+    if (slot && slot.late && fresh) pickK = 'grunt';
     bot.setKind(pickK);
     if (kinds[pickK].role && !bot.slot) bot.role = kinds[pickK].role;
   }
@@ -176,9 +220,10 @@ export function init(ctx) {
     bot.role = (p + 1) / (n + 1) <= cfg.passiveShare * (1 - 0.75 * mgr.aggr) + 1e-6 ? 'passive' : 'active'; // late raid: fewer guards stay at a post
   }
   // a post for a passive guard: a spot in / on a building, away from and unseen by the player
-  function findPost() {
-    const pl = ctx.player, posts = mgr.pois.filter((q) => q.name.startsWith('building'));
+  function findPost(high = false) {
+    const pl = ctx.player, all = mgr.pois.filter((q) => q.name.startsWith('building')), roofs = high ? all.filter((q) => q.name.endsWith('roof')) : all;
     for (let t = 0; t < 40; t++) {
+      const posts = t < 22 && roofs.length ? roofs : all; // a marksman looks for a roof first
       const q = posts[Math.random() * posts.length | 0]; if (!q) break;
       const id = nav.randomNode(q.x0, q.x1, q.z0, q.z1, q.y0, q.y1, 6); if (id < 0) continue;
       nav.nodePos(id, pt);
@@ -251,7 +296,8 @@ export function init(ctx) {
     }
   });
   events.on('impact', (e) => { // where exactly a guard was hit (zone, side) — refines the reaction takeDamage started
-    const t = e.target; if (e.kind === 'flesh' && t && t.isBot && t.hitAt && e.point && e.by !== t) t.hitAt(e.point, e.damage || 0, !!e.headshot);
+    const t = e.target;
+    if (e.kind === 'flesh' && t && t.isBot && t.hitAt && e.point && e.by !== t && t.hitAt(e.point, e.damage || 0, !!e.headshot) === 'blocked') { e.kind = 'shield'; e.damage = 0; e.blocked = true; e.headshot = false; } // stopped by a shield: not a hit (no damage number)
   });
   events.on('impact', (e) => {
     if (!e.point || e.kind !== 'world') return;
@@ -263,7 +309,7 @@ export function init(ctx) {
     } });
   });
   events.on('explosion', (e) => {
-    if (!e.point) return;
+    if (!e.point || e.kind === 'enemyGrenade') return; // (their own grenades are no news to them)
     if (cfg.ffa) { hearAll(e.point, cfg.hearShotDist * 0.8, e.by && e.by.pos ? e.by.pos : e.point, e.by); return; }
     guards((b) => { if (heardShot(b, e.point, cfg.hearExplosionDist)) b.hear(e.point, cfg.hearAwareness.explosion, 'shot', cfg.suspiciousAt + 0.1); });
   });
@@ -285,11 +331,12 @@ export function init(ctx) {
   ctx.bots = {
     list: mgr.bots, guards: mgr.guards, raiders: mgr.raiders, setCount, config: cfg, nav, pois: mgr.pois, stats: mgr.stats, stuckLog: mgr.stuckLog,
     get squads() { return squads.plan; }, raidSquads: squads.raidSquads,
+    grenades: roles.grenades, // the pooled enemy grenades (read-only): { on, pos, land (where it will / did come down), landed, fuse (s left once landed), radius, by }
     alertAll(pos) { for (const b of mgr.guards) if (b.alive) b.alert(pos, rand(0.2, 0.8), true); },
     // (Re)start: every guard respawns at its post / with its patrol; raiders are removed and, in team mode, the raid's
     // squads (config.raiders.squads) are scheduled to enter at the map edge over the next config.raiders.enterDelay seconds.
     respawnAll() {
-      squads.reset();
+      squads.reset(); roles.clear();
       for (const b of mgr.guards) { if (b.alive) { b.alive = false; b.releaseToken(); b.clearPath(); b.mesh.hide(); } b.pendingSpawn = true; b.spawnT = 0; }
       squads.schedule();
     },
@@ -316,8 +363,8 @@ export function init(ctx) {
     // search there; they still have to see the player to engage. Returns how many went.
     hunt(pos, n = 2) {
       if (!pos) return 0;
-      const key = (b) => b.pos.distanceTo(pos) + (b.squad && b.squad.type === 'post' ? 45 : 0); // patrols and roamers go first; a posted guard comes back to its post afterwards
-      const c = mgr.guards.filter((b) => b.alive && b.state !== 'combat' && b.state !== 'chase').sort((a, b) => key(a) - key(b));
+      const key = (b) => b.pos.distanceTo(pos) + (b.squad && b.squad.type === 'post' ? 45 : 0) - (b.special === 'rusher' ? 30 : 0); // patrols, roamers and above all rushers go first; a posted guard comes back to its post afterwards; marksmen stay on their perch
+      const c = mgr.guards.filter((b) => b.alive && b.state !== 'combat' && b.state !== 'chase' && b.special !== 'marksman').sort((a, b) => key(a) - key(b));
       let sent = 0;
       for (const b of c) { if (sent >= n) break; b.role = 'active'; if (b.huntTo(pos, 2.5)) { if (!sent) mgr.callout(b, 'hunt'); sent++; } }
       return sent;
@@ -332,7 +379,7 @@ export function init(ctx) {
     nav.update(dt);
     const tNav = performance.now() - t;
     if (mgr.guards.length !== cfg.count) setCount(cfg.count);
-    squads.update(dt);
+    squads.update(dt); roles.update(dt);
     { // how long has the player stayed in one spot? (guards flank / push a player who settles in)
       const pp = ctx.player.pos, dx = pp.x - mgr.anchor.x, dz = pp.z - mgr.anchor.z;
       if (dx * dx + dz * dz > cfg.campRadius * cfg.campRadius || Math.abs(pp.y - mgr.anchor.y) > 4 || !ctx.player.alive) { mgr.anchor.copy(pp); mgr.campT = 0; } else mgr.campT += dt;
@@ -344,7 +391,7 @@ export function init(ctx) {
           const slot = cfg.ffa ? null : squads.assignGuard(b); // a post, a place in a patrol, or nothing (a lone roamer)
           if (!slot) assignRole(b);
           assignKind(b);
-          const p = (slot && squads.slotSpawn(b)) || (!slot && b.role === 'passive' && findPost()) || findSpawn();
+          const p = (slot && squads.slotSpawn(b)) || (!slot && b.role === 'passive' && findPost(b.special === 'marksman')) || findSpawn();
           if (p) { b.spawn(p); squads.spawned(b); } else b.spawnT = 0.5;
         } }
         else if (b.deadT >= cfg.respawnDelay) { b.mesh.hide(); b.pendingSpawn = true; b.spawnT = 0; }

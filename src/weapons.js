@@ -314,7 +314,8 @@ export function init(ctx) {
         if (dl > 1e-4 && Math.abs(ox * dir.z - oz * dir.x) / dl > w.headR) head = false;
       }
       if (head) dmg *= w.headMult;
-      t.takeDamage(dmg, { from: origin.clone(), source: player, headshot: head, weapon: w.id });
+      const res = t.takeDamage(dmg, { from: origin.clone(), source: player, headshot: head, weapon: w.id, point: hit.point });
+      if (res === 'blocked') return; // stopped by a shield: the enemies code reports the spark; no hit marker, no damage
       const kill = !t.alive;
       events.emit('impact', { point: hit.point, normal: hit.normal.clone(), kind: 'flesh', target: t, damage: dmg, by: player, headshot: head, kill, weapon: w.id });
       agg.hit = true; agg.head = agg.head || head; agg.kill = agg.kill || kill; agg.dmg += dmg;

@@ -34,6 +34,7 @@ export function init(ctx) {
     #hp-vit .kit kbd { font: inherit; font-size: 9px; padding: 0 4px; border: 1px solid rgba(255,255,255,.4); opacity: .8; }
     #hp-vit .kit .pip { width: 8px; height: 8px; }
     #wp-health, #rd-kit { display: none !important; } /* replaced by the vitals block */
+    #hp-warn { position: fixed; left: 0; right: 0; top: 30%; text-align: center; font-size: 20px; font-weight: 700; letter-spacing: 6px; text-transform: uppercase; opacity: 0; transition: opacity .15s; pointer-events: none; text-shadow: 0 2px 6px #000; }
 
     /* top-centre: one tidy stack — status line, heat, detection, shield */
     #rd-top .line { background: rgba(8,12,16,.6) !important; border-bottom: 2px solid rgba(255,197,107,.7); padding: 5px 16px !important; }
@@ -59,6 +60,14 @@ export function init(ctx) {
     const p = pings[pi]; pi = (pi + 1) % pings.length; p.x = e.origin.x; p.z = e.origin.z; p.t = ctx.time; p.raider = e.by.faction === 'raider';
   });
 
+  // warnings: a sniper lining you up, a grenade landing near you, a rusher winding up
+  const warn = document.createElement('div'); warn.id = 'hp-warn'; ctx.hud.appendChild(warn);
+  let warnT = 0;
+  const alarm = (text, color, secs) => { warn.textContent = text; warn.style.color = color; warn.style.opacity = '1'; warnT = secs; };
+  events.on('marksmanAim', (e) => { if (e.phase === 'aim') alarm('Sniper — break line of sight', '#ff5a4a', e.time || 1.2); else if (e.phase === 'cancel' && warn.textContent.startsWith('Sniper')) warnT = 0.01; });
+  events.on('enemyGrenade', (e) => { if (e.phase === 'land' && e.point && Math.hypot(e.point.x - player.pos.x, e.point.z - player.pos.z) < (e.radius || 5) + 4) alarm('Grenade — move', '#ffb23a', e.fuse || 1.6); });
+  events.on('botTell', (e) => { if (e.attack === 'charge' && e.bot && Math.hypot(e.bot.pos.x - player.pos.x, e.bot.pos.z - player.pos.z) < 12) alarm('Rusher — dodge', '#ff7ac8', 0.8); });
+  events.on('raidEnd', () => { warnT = 0.01; });
   const C = R + 4;
   function draw() {
     const px = player.pos.x, pz = player.pos.z, cos = Math.cos(player.yaw), sin = Math.sin(player.yaw);
@@ -97,7 +106,8 @@ export function init(ctx) {
   }
 
   return {
-    update() {
+    update(dt) {
+      if (warnT > 0) { warnT -= dt || 0.016; if (warnT <= 0) warn.style.opacity = '0'; }
       const raid = ctx.raid, inRaid = raid && raid.state === 'raid';
       map.hidden = vit.hidden = !inRaid; if (!inRaid) return;
       if (frame++ % 2 === 0) draw();

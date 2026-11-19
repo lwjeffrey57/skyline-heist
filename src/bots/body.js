@@ -13,6 +13,13 @@ import * as THREE from 'three';
 //   tell  — between bursts the carbine sits at low ready; it snaps up and the visor flares just before firing
 //   death — a parameterised procedural fall (see die()): crumple, topple, spin, tumble, thrown ... every one is
 //           randomised (fall axis, twist, limb rest pose), the weapon is knocked away, then the body fades
+// OUTFITS (setOutfit(kind), guards only): each enemy type has its own silhouette, built once on first use from the
+//   shared materials and toggled on / off — grunt (plain), shield (a tall riot shield on the left arm that swings
+//   aside when it fires its sidearm), scout = the rusher (small, hunched, no gun, glowing forearm blades, spine fins),
+//   marksman (lanky: long scoped rifle, sensor mast, long back plate), grenadier (mortar tubes over the shoulders,
+//   bandolier, drum launcher), heavy (wide: pauldrons, a rotary gun at the hip whose barrels spin up, a glowing drum
+//   on its back = the weak spot). update() extras: s.shield (0..1 raised), s.spin (0..1 barrels), s.claw (0..1 strike),
+//   s.throw (0..1 arm up to throw).
 // Local space: +Y up, +Z forward, -X is the bot's right-hand side.
 // =============================================================================
 
@@ -22,6 +29,15 @@ const GUN_POS = new THREE.Vector3(-0.1, 0.4, 0.03), GUN_RELAX_POS = new THREE.Ve
 const GRIP_R = new THREE.Vector3(0, -0.1, 0.17), GRIP_L = new THREE.Vector3(0.005, -0.065, 0.39);
 const DOWN = new THREE.Vector3(0, -1, 0);
 const Q_RELAX = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.62, 0.55, 0.15, 'YXZ'));
+const GUN_HIP = new THREE.Vector3(-0.2, 0.2, 0.0), ONE = new THREE.Vector3(1, 1, 1);
+const SH_UP = new THREE.Vector3(0.07, -0.02, 0.42), SH_DOWN = new THREE.Vector3(0.4, -0.12, 0.02), SH_HANDLE = new THREE.Vector3(-0.03, 0.1, -0.08), THROW_HAND = new THREE.Vector3(0.3, 0.74, -0.08);
+// per-outfit pose: gunScale, noGun, hideStd (own gun model), hip (gun carried at the hip), hunch (rad), drop (m), shield
+const POSES = {
+  grunt: {}, marksman: {}, grenadier: {},
+  shield: { gunScale: new THREE.Vector3(0.9, 0.9, 0.5), shield: true },
+  scout: { noGun: true, hunch: 0.62, drop: 0.11, noPack: true },
+  heavy: { hideStd: true, hip: true, noPack: true },
+};
 
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -47,6 +63,12 @@ function geos() {
     gunBody: box(0.06, 0.11, 0.34), gunStock: box(0.045, 0.09, 0.17), gunShroud: box(0.05, 0.065, 0.22), gunBarrel: cyl(0.016, 0.016, 0.3, 8),
     gunBrake: cyl(0.025, 0.025, 0.07, 8), gunMag: box(0.04, 0.17, 0.075), gunGrip: box(0.04, 0.1, 0.05), gunRail: box(0.014, 0.014, 0.26), gunSight: box(0.03, 0.045, 0.05),
     bar: new THREE.PlaneGeometry(1, 1),
+    // outfits
+    shPlate: box(0.95, 1.5, 0.05), shRim: box(1.01, 0.07, 0.08), shSide: box(0.07, 1.5, 0.08), shSlit: box(0.42, 0.05, 0.02), shBoss: box(0.34, 0.5, 0.03),
+    blade: box(0.028, 0.46, 0.1), spine: box(0.03, 0.17, 0.13),
+    longBarrel: cyl(0.014, 0.014, 0.66, 8), scope: cyl(0.03, 0.03, 0.26, 10), mast: box(0.022, 0.52, 0.05), cloak: box(0.46, 0.8, 0.03), bipod: cyl(0.008, 0.008, 0.26, 5), lens: cyl(0.05, 0.05, 0.04, 10),
+    tube: cyl(0.075, 0.075, 0.52, 10), nade: new THREE.SphereGeometry(0.052, 10, 8), drum: cyl(0.115, 0.115, 0.09, 12), fatBarrel: cyl(0.052, 0.052, 0.28, 10),
+    pauldron: box(0.27, 0.27, 0.38), hvBody: box(0.15, 0.17, 0.5), hvBarrel: cyl(0.027, 0.027, 0.58, 8), hvRing: cyl(0.09, 0.09, 0.05, 12), ammoBox: box(0.16, 0.2, 0.2), backDrum: cyl(0.2, 0.2, 0.44, 14), weak: box(0.22, 0.2, 0.03), gorget: box(0.46, 0.14, 0.3),
     // raider outfit
     poncho: new THREE.CylinderGeometry(0.1, 0.36, 0.5, 10, 1, true), ruck: box(0.34, 0.46, 0.2), ruckFlap: box(0.3, 0.14, 0.03),
     bedroll: cyl(0.085, 0.085, 0.44, 10), pouch: box(0.09, 0.11, 0.07), brim: cyl(0.27, 0.29, 0.022, 16), crown: cyl(0.1, 0.125, 0.07, 12),
@@ -100,6 +122,7 @@ export class BotBody {
       const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = shadow; m.userData.sh = shadow; m.receiveShadow = true; parent.add(m); return m;
     };
     const grp = (parent, x = 0, y = 0, z = 0) => { const o = new THREE.Group(); o.position.set(x, y, z); parent.add(o); return o; };
+    this._add = add; this._grp = grp; this.outfits = {}; this.outfit = 'grunt'; this.pose = POSES.grunt; this.packParts = []; this.gunStd = [];
 
     this.root = new THREE.Group(); scene.add(this.root);
     this.tilt = grp(this.root);
@@ -117,11 +140,11 @@ export class BotBody {
     const Hd = this.head = grp(T, 0, NECK_Y, 0);
     if (!raider) {
       const core = add(T, g.core, M.accent, 0, 0.37, 0.158, false); core.rotation.x = Math.PI / 2;
-      add(T, g.pack, M.armor, 0, 0.33, -0.185);
-      add(T, g.vent, M.accent, 0.075, 0.33, -0.255, false); add(T, g.vent, M.accent, -0.075, 0.33, -0.255, false);
+      this.packParts.push(add(T, g.pack, M.armor, 0, 0.33, -0.185));
+      this.packParts.push(add(T, g.vent, M.accent, 0.075, 0.33, -0.255, false), add(T, g.vent, M.accent, -0.075, 0.33, -0.255, false));
       for (const s of [1, -1]) { const sp = add(T, g.shoulder, M.plate, s * 0.235, 0.465, 0); sp.scale.set(1.12, 0.85, 1.15); }
       const ant = add(T, g.antenna, M.gun, 0.1, 0.62, -0.21, false); ant.rotation.z = -0.1;
-      add(T, g.tip, M.accent, 0.118, 0.8, -0.21, false);
+      this.packParts.push(ant, add(T, g.tip, M.accent, 0.118, 0.8, -0.21, false));
       add(Hd, g.helmet, M.plate, 0, 0.1, 0).scale.set(0.95, 1.04, 1.08);
       add(Hd, g.visor, M.visor, 0, 0.105, 0.012, false).scale.set(0.99, 1, 1.1);
       add(Hd, g.jaw, M.armor, 0, 0.015, 0.075);
@@ -153,6 +176,7 @@ export class BotBody {
     add(W, g.gunGrip, M.gun, 0, -0.095, 0.17).rotation.x = -0.25;
     add(W, g.gunRail, M.accent, 0, 0.064, 0.34, false);
     add(W, g.gunSight, M.gun, 0, 0.075, 0.2, false);
+    this.gunStd = W.children.slice();
 
     // arms (IK, torso space)
     this.arm = [];
@@ -185,6 +209,7 @@ export class BotBody {
     this.bar.renderOrder = 5;
 
     this.gunVel = new THREE.Vector3(); this.gunSpin = new THREE.Vector3();
+    this.shieldS = 0; this.clawS = 0; this.throwS = 0; this.spinV = 0; this.shieldGrp = null; this.barrels = null;
     this.fallAxis = new THREE.Vector3(1, 0, 0);
     this.legHit = [0, 0];
     // death parameters (filled by die())
@@ -200,9 +225,10 @@ export class BotBody {
     this.stagS = 0; this.crouch = 0; this.tellS = 0; this.limpS = 0; this.legHit[0] = 0; this.legHit[1] = 0; this.glow = -1; this.setGlow(0);
     this.dead = false; this.deadT = 0; this.fall = 0; this.fallV = 0; this.limp = 0; this.gunLoose = false; this.gunRest = false;
     this.tilt.quaternion.identity(); this.tilt.position.set(0, 0, 0);
-    this.torso.add(this.gun); this.gun.scale.setScalar(1);
+    this.torso.add(this.gun); this.gun.scale.copy(this.pose.gunScale || ONE);
     this.setOpacity(1);
-    this.root.visible = true; this.gun.visible = true; this.bar.visible = false;
+    this.root.visible = true; this.gun.visible = !this.pose.noGun; this.bar.visible = false;
+    this.shieldS = 0; this.clawS = 0; this.throwS = 0; this.spinV = 0;
     this.setShadows(true);
   }
 
@@ -217,6 +243,60 @@ export class BotBody {
   }
 
   hide() { this.root.visible = false; this.gun.visible = false; this.bar.visible = false; }
+
+  // Switch the look to an enemy type (guards only; unknown names fall back to the plain grunt).
+  setOutfit(kind) {
+    if (this.look !== 'guard') return;
+    if (!POSES[kind]) kind = 'grunt';
+    if (!this.outfits[kind]) this.outfits[kind] = this.buildOutfit(kind);
+    for (const k in this.outfits) { const on = k === kind; for (const m of this.outfits[k]) m.visible = on; }
+    const P = this.pose = POSES[kind]; this.outfit = kind;
+    for (const m of this.packParts) m.visible = !P.noPack;
+    for (const m of this.gunStd) m.visible = !P.hideStd;
+    if (!this.gunLoose) this.gun.scale.copy(P.gunScale || ONE);
+    this.gun.visible = this.root.visible && !P.noGun;
+  }
+  buildOutfit(kind) {
+    const g = geos(), M = this.mats, add = this._add, T = this.torso, W = this.gun, Hd = this.head, out = [];
+    const put = (parent, geo, mat, x, y, z, sh = true) => { const m = add(parent, geo, mat, x, y, z, sh); out.push(m); return m; };
+    if (kind === 'shield') {
+      const S = this.shieldGrp = this._grp(T); out.push(S);
+      add(S, g.shPlate, M.armor, 0, 0, 0); add(S, g.shRim, M.plate, 0, 0.74, 0); add(S, g.shRim, M.plate, 0, -0.74, 0);
+      add(S, g.shSide, M.plate, 0.47, 0, 0); add(S, g.shSide, M.plate, -0.47, 0, 0);
+      add(S, g.shBoss, M.plate, 0, -0.2, 0.035); add(S, g.shSlit, M.accent, 0, 0.5, 0.032, false); add(S, g.shSlit, M.accent, 0, -0.2, 0.055, false).scale.set(0.5, 3, 1);
+      for (const s of [1, -1]) put(T, g.shoulder, M.plate, s * 0.25, 0.47, 0).scale.set(1.5, 1.05, 1.5);
+    } else if (kind === 'scout') {
+      for (const A of this.arm) { put(A.lo, g.blade, M.accent, 0, -0.4, 0.04, false); put(A.lo, g.bracer, M.armor, 0, -0.1, 0.0).scale.set(1.2, 1.2, 1.3); }
+      for (let i = 0; i < 4; i++) put(T, g.spine, i % 2 ? M.plate : M.accent, 0, 0.12 + i * 0.13, -0.17, i % 2 === 1).rotation.x = 0.5;
+      put(Hd, g.fin, M.accent, 0, 0.24, -0.06, false).scale.set(1, 1.6, 1.3);
+    } else if (kind === 'marksman') {
+      put(W, g.longBarrel, M.gun, 0, 0.012, 1.1).rotation.x = Math.PI / 2;
+      put(W, g.gunBrake, M.accent, 0, 0.012, 1.44, false).rotation.x = Math.PI / 2;
+      put(W, g.scope, M.armor, 0, 0.1, 0.3).rotation.x = Math.PI / 2;
+      put(W, g.lens, M.accent, 0, 0.1, 0.44, false).rotation.x = Math.PI / 2;
+      for (const s of [1, -1]) put(W, g.bipod, M.gun, s * 0.05, -0.1, 0.7).rotation.z = s * 0.35;
+      put(T, g.mast, M.gun, -0.1, 0.84, -0.2); put(T, g.tip, M.accent, -0.1, 1.11, -0.2, false).scale.setScalar(1.6);
+      put(T, g.cloak, M.suit, 0, -0.02, -0.2).rotation.x = 0.12;
+      put(Hd, g.lens, M.accent, 0.05, 0.11, 0.13, false).rotation.x = Math.PI / 2;
+    } else if (kind === 'grenadier') {
+      for (const s of [1, 0, -1]) { const t = put(T, g.tube, M.armor, s * 0.17, 0.62, -0.26); t.rotation.x = -0.35; t.rotation.z = -s * 0.12; put(T, g.nade, M.accent, s * 0.17, 0.86, -0.345, false); }
+      for (let i = 0; i < 4; i++) put(T, g.nade, M.plate, -0.15 + i * 0.1, 0.3 - i * 0.045, 0.15);
+      put(W, g.drum, M.plate, 0, -0.07, 0.36).rotation.z = Math.PI / 2;
+      put(W, g.fatBarrel, M.armor, 0, 0.012, 0.7).rotation.x = Math.PI / 2;
+      for (const s of [1, -1]) put(T, g.shoulder, M.armor, s * 0.25, 0.47, 0).scale.set(1.35, 1.0, 1.35);
+    } else if (kind === 'heavy') {
+      for (const s of [1, -1]) { const p = put(T, g.pauldron, M.plate, s * 0.31, 0.47, 0); p.rotation.z = -s * 0.2; }
+      put(T, g.gorget, M.armor, 0, 0.5, 0.0);
+      put(T, g.backDrum, M.armor, 0, 0.32, -0.27).rotation.z = Math.PI / 2;
+      put(T, g.weak, M.accent, 0, 0.32, -0.475, false);
+      put(W, g.hvBody, M.armor, 0, -0.01, 0.3); put(W, g.ammoBox, M.plate, 0.1, -0.12, 0.3); put(W, g.hvRing, M.plate, 0, 0, 0.58).rotation.x = Math.PI / 2;
+      put(W, g.gunGrip, M.gun, 0, -0.12, 0.1); put(W, g.gunRail, M.accent, 0, 0.09, 0.3, false);
+      const B = this.barrels = this._grp(W, 0, 0, 0.6); out.push(B);
+      for (let i = 0; i < 3; i++) { const a = i * Math.PI * 2 / 3; add(B, g.hvBarrel, M.gun, Math.cos(a) * 0.04, Math.sin(a) * 0.04, 0.26).rotation.x = Math.PI / 2; }
+      add(B, g.hvRing, M.gun, 0, 0, 0.5).rotation.x = Math.PI / 2;
+    }
+    return out;
+  }
 
   // impulse in the bot's local frame (lx: toward its left, lz: forward) — positive lz = hit from behind
   // side (-1..1): where across the body the round landed (+ = its left) -> the torso twists away from it
@@ -322,8 +402,9 @@ export class BotBody {
     this.dipV += (-110 * this.dip - 13 * this.dipV) * dt; this.dip = clamp(this.dip + this.dipV * dt, -0.3, 0.08);
     const lh0 = this.legHit[0] = damp(this.legHit[0], 0, 3.2, dt), lh1 = this.legHit[1] = damp(this.legHit[1], 0, 3.2, dt), lhs = lh0 - lh1;
     const limpDip = lp * 0.05 * Math.max(0, Math.sin(this.phase + (lhs < 0 ? Math.PI : 0)));
+    const PO = this.pose, hunch = PO.hunch || 0;
     const hipY = HIP_Y - 0.05 * sn - (speed > 6.5 ? 0.03 : 0) + bob - 0.02 * this.air + Math.sin(performance.now() * 0.0017 + this.phase0()) * 0.004
-      - 0.3 * cr - 0.11 * st + this.dip - limpDip - 0.07 * Math.max(lh0, lh1);
+      - 0.3 * cr - 0.11 * st + this.dip - limpDip - 0.07 * Math.max(lh0, lh1) - (PO.drop || 0);
     this.hips.position.set(Math.sin(this.phase) * 0.018 * sn + lhs * 0.05, hipY, -0.05 * cr);
     this.hips.rotation.set(0, Math.sin(this.phase) * 0.1 * sn * this.mz, lhs * 0.2);
 
@@ -363,8 +444,8 @@ export class BotBody {
     this.setGlow(tl < 0.02 ? 0 : Math.round(tl * 20) / 20);
     const aimT = s.aiming * (1 - 0.8 * st);
     const ab = this.aimBlend = damp(this.aimBlend, aimT, aimT > this.aimBlend ? 17 : 9, dt);
-    this.torso.rotation.set(this.lean + this.flP + 0.05 * (1 - ab) - s.aimPitch * 0.25 * ab + 0.36 * cr + 0.3 * st + 0.05 * tl, this.twist * 0.6 + this.flY, -this.leanS + this.flR + (s.stagX || 0) * -0.22 * st - lhs * 0.12, 'YXZ');
-    this.head.rotation.set(-s.aimPitch * 0.55 + this.flP * 0.6 - this.lean * 0.6 + this.hdP - 0.3 * cr + 0.28 * st, this.twist * 0.4 + this.hdY + this.flY * 0.3, this.flR * 0.5 + this.hdR, 'YXZ');
+    this.torso.rotation.set(this.lean + this.flP + 0.05 * (1 - ab) - s.aimPitch * 0.25 * ab + 0.36 * cr + 0.3 * st + 0.05 * tl + hunch, this.twist * 0.6 + this.flY, -this.leanS + this.flR + (s.stagX || 0) * -0.22 * st - lhs * 0.12, 'YXZ');
+    this.head.rotation.set(-s.aimPitch * 0.55 + this.flP * 0.6 - this.lean * 0.6 + this.hdP - 0.3 * cr + 0.28 * st - hunch * 0.9, this.twist * 0.4 + this.hdY + this.flY * 0.3, this.flR * 0.5 + this.hdR, 'YXZ');
 
     // ---- weapon + arms ----------------------------------------------------
     // torso world orientation = root yaw * hips * torso
@@ -372,10 +453,26 @@ export class BotBody {
     q2.setFromEuler(e1.set(-s.aimPitch - this.kick * 0.035, s.aimYaw, 0, 'YXZ'));
     q3.copy(q1).invert().multiply(q2);                 // aim direction in torso space
     this.gun.quaternion.copy(Q_RELAX).slerp(q3, ab);
-    this.gun.position.copy(GUN_RELAX_POS).lerp(GUN_POS, ab);
+    this.gun.position.copy(GUN_RELAX_POS).lerp(PO.hip ? GUN_HIP : GUN_POS, ab);
     this.gun.position.y += bob * 0.4; this.gun.position.z -= this.kick * 0.035;
+    // outfit extras: the shield swings between the front and the left side, the heavy's barrels spin, the rusher's arms
+    const sb = this.shieldS = damp(this.shieldS, s.shield || 0, (s.shield || 0) > this.shieldS ? 9 : 16, dt);
+    const cl = this.clawS = damp(this.clawS, s.claw || 0, (s.claw || 0) > this.clawS ? 30 : 6, dt);
+    const th = this.throwS = damp(this.throwS, s.throw || 0, 12, dt);
+    if (PO.shield && this.shieldGrp) { const S = this.shieldGrp; S.position.copy(SH_DOWN).lerp(SH_UP, sb); S.rotation.set(0.1 * (1 - sb) - 0.3 * st, 1.3 * (1 - sb), 0); }
+    if (this.barrels && PO.hip) { this.spinV = damp(this.spinV, (s.spin || 0) * 34, (s.spin || 0) > 0 ? 5 : 2, dt); this.barrels.rotation.z += this.spinV * dt; }
+    const gs = PO.gunScale || ONE;
     for (const A of this.arm) {
-      A.hand.copy(A.s < 0 ? GRIP_R : GRIP_L).applyQuaternion(this.gun.quaternion).add(this.gun.position);
+      const right = A.s < 0;
+      if (PO.noGun) { // the rusher: arms pump while it runs, spread wide in the wind-up, stab forward in the lunge
+        const sw = Math.sin(this.phase) * 0.2 * sn * A.s;
+        v3.set(A.s * 0.27, 0.0, 0.2 + sw); v4.set(A.s * 0.46, 0.34, -0.12); v3.lerp(v4, tl);
+        v4.set(A.s * 0.1, 0.3, 0.52); A.hand.copy(v3).lerp(v4, cl);
+      } else if (!right && PO.shield && this.shieldGrp) A.hand.copy(SH_HANDLE).applyQuaternion(this.shieldGrp.quaternion).add(this.shieldGrp.position);
+      else {
+        A.hand.copy(right ? GRIP_R : GRIP_L).multiply(gs).applyQuaternion(this.gun.quaternion).add(this.gun.position);
+        if (!right && th > 0.01) A.hand.lerp(THROW_HAND, th);
+      }
       solveJoint(A.S, A.hand, ARM1, ARM2, A.pole, v5);
       v3.copy(A.S); v4.copy(A.hand);
       // clamp the hand to arm's reach so the forearm never stretches

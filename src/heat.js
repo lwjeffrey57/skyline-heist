@@ -15,6 +15,7 @@ const KILL = 2.5;
 
 export function init(ctx) {
   const { player, events } = ctx;
+  let baseMix = null;
   let value = 0, tier = 1, active = false, huntT = 0, alertCd = 0, bannerT = 0, shown = -1;
 
   const style = document.createElement('style');
@@ -40,6 +41,13 @@ export function init(ctx) {
       ctx.bots.config.respawnDelay = T.respawn * (lullT > 0 ? 2.5 : 1);
       ctx.bots.setCount(raid.config.bots + T.bots);
       if (ctx.bots.setAggression) ctx.bots.setAggression(T.aggr);
+      const K = ctx.bots.config.kinds; // hotter raids bring more of the types that force you to move
+      if (K && K.scout && K.shield) {
+        if (!baseMix) baseMix = { s: [K.scout.weight, K.scout.max], h: [K.shield.weight, K.shield.max] };
+        const up = Math.max(0, tier - 2);
+        K.scout.weight = baseMix.s[0] * (1 + up * 0.5); if (baseMix.s[1]) K.scout.max = baseMix.s[1] + up;
+        K.shield.weight = baseMix.h[0] * (1 + up * 0.35); if (baseMix.h[1]) K.shield.max = baseMix.h[1] + Math.floor(up / 2);
+      }
     }
   }
   function hunt(n) { if (ctx.bots && ctx.bots.hunt && n > 0) ctx.bots.hunt(player.pos, n); }

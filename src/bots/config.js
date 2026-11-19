@@ -17,19 +17,57 @@ export const CONFIG = {
   maxRaysPerFrame: 10,      // global cap on bot line-of-sight rays per frame (current-target checks are never skipped)
   searchAfterKill: 4,       // seconds of looking around after the target dies
   // ---- guards (team mode, ffa: false): roles and detection -------------------
-  // enemy types (team mode only). `set` replaces a config value for that guard, `mul` multiplies the shared value,
-  // `role` forces passive/active, `max` caps how many can be alive at once, `weight` is how often it is rolled.
+  // ENEMY TYPES (team mode only). Each one asks something different of the player and has its own silhouette.
+  //   weight  share of the living guards this type should make up (weight / sum of weights). Spawns fill the type
+  //           that is furthest below its share, so 16 guards with the defaults are about 8 grunts, 2 shields,
+  //           2 rushers, 1-2 marksmen, 1-2 grenadiers, 1 heavy. Change weights / max at runtime (e.g. with heat):
+  //           the next (re)spawns follow them. Slots of posted squads carry a preferred type (see squads.js).
+  //   max     hard cap on how many may be alive at once (Bot.setKind() by another system is not capped)
+  //   role    forces 'passive' (holds a post) / 'active' for guards without a squad slot
+  //   scale   height multiplier, wide: extra width (silhouette and hit box), color: glow colour, outfit: body.js look
+  //   set     replaces a config value for that guard, mul multiplies the shared value. `special` selects the behaviour:
+  //     'shield'     frontal shield (shieldArc degrees) stops bullets while it is up; feet (below shieldFeet x height),
+  //                  flanks, the back and shots from above (steeper than shieldOverTop rad) are open. It drops while the
+  //                  guard fires its sidearm (+ shieldDropAfter s) and for shieldStaggerDrop s after a blast; a blast
+  //                  from the front only does shieldBlast x damage. Turns slowly (aimMaxTurn): dash past it.
+  //     'rusher'     no gun. Sprints at the target in zigzags (zigzag m), winds up for chargeWindup s inside chargeRange,
+  //                  then lunges in a straight, committed line (lungeSpeed for lungeTime); meleeDamage within meleeRange,
+  //                  once per lunge, then stands spent for meleeRecover s. Any solid hit staggers it out of a charge.
+  //     'marksman'   holds a laser on the target for aimTime s (the last lockTime s the line is frozen where the target
+  //                  will be at snipeLead x its velocity), then one snipeDamage round. Losing line of sight for
+  //                  snipeLosGrace s before the lock, or any hit, cancels it. snipeCooldown s between attempts.
+  //     'grenadier'  lobs a grenade (grenadeWindup s tell) at a target that has been out of sight for grenadeAfterUnseen s
+  //                  or has stayed put for grenadeCamp s, between grenadeRange metres. It lands, lies there for
+  //                  grenadeFuse s with a marker of grenadeRadius, then does up to grenadeDamage (x grenadeEdge at the rim).
+  //     'suppressor' machine gun: spools for tellTime s, then long bursts fired down its aim line with a real cone
+  //                  (`spread`), turning slowly. Hits from behind do backMult x damage, body hits from the front frontMult x.
+  //   noCover: never breaks for cover (shield, rusher, heavy).
+  special: null, noCover: false, perchLeash: 7,
   kinds: {
-    grunt: { weight: 4, label: 'Guard', scale: 1.0, color: 0xff4a1c, set: {}, mul: {} },
-    heavy: { weight: 2, max: 2, label: 'Heavy', scale: 1.15, color: 0xff1a3c, role: 'active',
-      set: { hp: 240, burst: [7, 12], burstPause: [0.9, 1.6], magSize: 60, reloadTime: 3.2, staggerDamage: 80, staggerSustain: 130, staggerResist: 0.5, suppressResist: 0.8, flinchScale: 0.6, tellTime: 0.4, defensiveChance: 0.15 },
-      mul: { walkSpeed: 0.72, sprintSpeed: 0.7, patrolSpeed: 0.8, combatSpeed: 0.65, damage: 1.15, aimSpeed: 0.75 } },
-    scout: { weight: 2, max: 2, label: 'Scout', scale: 0.92, color: 0x35e0ff, role: 'active',
-      set: { hp: 70, engageRange: 20, burst: [4, 8], burstPause: [0.25, 0.6], accuracyByRange: [[0, 0.8], [8, 0.6], [16, 0.35], [24, 0.15]] },
-      mul: { walkSpeed: 1.25, sprintSpeed: 1.25, patrolSpeed: 1.35, combatSpeed: 1.35, damage: 0.75, fireRate: 1.3 } },
-    marksman: { weight: 1, max: 1, label: 'Marksman', scale: 1.0, color: 0xffe14a, role: 'passive',
-      set: { hp: 90, engageRange: 55, sightRangePassive: 50, burst: [1, 1], burstPause: [1.8, 2.6], reactionTime: [0.9, 1.3], tellTime: 0.6, accuracyByRange: [[0, 0.6], [20, 0.55], [40, 0.45], [55, 0.3]] },
-      mul: { damage: 4.5 } },
+    grunt: { weight: 8, label: 'Guard', scale: 1.0, color: 0xff4a1c, set: {}, mul: {} },
+    shield: { weight: 2, max: 2, label: 'Shield', scale: 1.05, wide: 1.12, color: 0x4a8dff, role: 'active',
+      set: { special: 'shield', noCover: true, hp: 150, shieldArc: 120, shieldFeet: 0.2, shieldOverTop: 0.6, shieldBlast: 0.35, shieldDropAfter: 0.35, shieldStaggerDrop: 1.4,
+        burst: [3, 4], burstPause: [1.7, 2.6], tellTime: 0.45, fireRate: 5.5, magSize: 12, reloadTime: 2.4, preferredRange: [5, 8], closeInBeyond: 1, minRange: 2.5, engageRange: 26,
+        aimMaxTurn: 2.0, suppressResist: 1, staggerDamage: 90, staggerSustain: 200, staggerResist: 0.6, flinchScale: 0.5, retreatHp: 0, defensiveChance: 0, underFireCover: 0,
+        accuracyByRange: [[0, 0.8], [8, 0.62], [16, 0.35], [26, 0.15]] },
+      mul: { walkSpeed: 0.6, sprintSpeed: 0.5, patrolSpeed: 0.8, combatSpeed: 0.6, damage: 1.3 } },
+    scout: { weight: 2, max: 3, label: 'Rusher', scale: 0.86, color: 0xff3ad0, role: 'active',
+      set: { special: 'rusher', noCover: true, hp: 55, chargeRange: 7.5, chargeWindup: 0.55, lungeSpeed: 17, lungeTime: 0.55, meleeRange: 1.6, meleeDamage: 34, meleeRecover: 1.0, zigzag: 3,
+        staggerDamage: 18, staggerSustain: 30, staggerImmunity: 0.4, suppressResist: 1, retreatHp: 0, defensiveChance: 0, underFireCover: 0, reactionTime: [0.2, 0.35] },
+      mul: { walkSpeed: 1.3, sprintSpeed: 1.4, patrolSpeed: 1.3, combatSpeed: 1.4 } },
+    marksman: { weight: 1.5, max: 2, label: 'Marksman', scale: 1.08, wide: 0.92, color: 0xffe14a, role: 'passive',
+      set: { special: 'marksman', hp: 80, perchLeash: 7, engageRange: 75, sightRange: 65, sightRangePassive: 65, aimTime: 1.2, lockTime: 0.22, snipeLead: 0.7, snipeDamage: 60, snipeLosGrace: 0.12, snipeCooldown: [2.6, 3.6],
+        reactionTime: [0.5, 0.8], retreatHp: 35 },
+      mul: {} },
+    grenadier: { weight: 1.5, max: 2, label: 'Grenadier', scale: 1.0, wide: 1.05, color: 0x35ffb0, role: 'active',
+      set: { special: 'grenadier', hp: 100, grenadeRange: [8, 34], grenadeCooldown: [6, 9], grenadeWindup: 0.7, grenadeFuse: 1.6, grenadeRadius: 5, grenadeDamage: 55, grenadeEdge: 0.2, grenadeStructure: 70,
+        grenadeError: 1.0, grenadeAfterUnseen: 0.8, grenadeCamp: 2.5, preferredRange: [16, 24], burst: [2, 3], burstPause: [1.0, 1.8],
+        accuracyByRange: [[0, 0.6], [10, 0.45], [20, 0.25], [35, 0.12], [50, 0.05]] },
+      mul: { damage: 0.75 } },
+    heavy: { weight: 1, max: 2, label: 'Heavy', scale: 1.18, wide: 1.2, color: 0xff1a3c, role: 'active',
+      set: { special: 'suppressor', noCover: true, hp: 260, backMult: 2, frontMult: 0.65, tellTime: 0.8, burst: [22, 34], burstPause: [1.8, 2.6], fireRate: 11, magSize: 90, reloadTime: 3.6, spread: 0.04,
+        aimMaxTurn: 1.6, preferredRange: [14, 22], staggerDamage: 90, staggerSustain: 160, staggerResist: 0.5, suppressResist: 1, flinchScale: 0.5, retreatHp: 0, defensiveChance: 0, underFireCover: 0 },
+      mul: { walkSpeed: 0.62, sprintSpeed: 0.6, patrolSpeed: 0.78, combatSpeed: 0.5, damage: 0.85, aimSpeed: 0.5 } },
   },
   passiveShare: 0.5,        // share of living guards that hold a post instead of patrolling the map
   passiveLoopRadius: 8,     // m: a passive guard idles within this distance of its post
