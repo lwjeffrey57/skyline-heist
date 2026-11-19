@@ -62,7 +62,7 @@ export function init(ctx) {
     if (b && b.mesh && !b.alive) { gone.add(b); }
     probe.set(c.x, c.y + 0.3, c.z); const h = world.raycast(probe, down, 8); e.floor = h ? h.point.y : c.y - 1;
     e.t = 0;
-    e.burst.material.rotation = Math.random() * 6; e.burst.visible = true;
+    e.burst.visible = false; // the comic star was too much: the blast is now the ring, the smoke, the pieces and the flash
     toCam.copy(ctx.camera.position).sub(c).normalize(); e.burst.position.copy(c).addScaledVector(toCam, 0.9); // in front of its own smoke
     e.ring.position.set(c.x, e.floor + 0.08, c.z); e.ring.visible = true;
     const col = b && b.cfg && b.kindColor != null ? b.kindColor : (e.color || 0xff4a1c);
@@ -104,7 +104,7 @@ export function init(ctx) {
         // burst: snaps out, holds a beat, then is gone
         // hard-edged shapes cannot fade, so the burst snaps out, holds a beat and collapses, like a drawn panel
         const bs = (t < 0.08 ? t / 0.08 : t < 0.24 ? 1 + (t - 0.08) * 0.6 : Math.max(0, 1.1 * (1 - (t - 0.24) / 0.09))) * 2.7 * sz; e.burst.scale.set(Math.max(0.001, bs), Math.max(0.001, bs), 1);
-        e.burst.visible = t < 0.33;
+        e.burst.visible = false;
         const rs = (1 - Math.pow(1 - Math.min(1, t / 0.45), 3)) * 4.5 * sz; e.ring.scale.set(rs, rs, 1);
         e.ring.visible = t < 0.42;
         for (const p of e.puffs) {
