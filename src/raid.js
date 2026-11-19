@@ -32,7 +32,7 @@ const UPGRADES = [
   { id: 'pouch', key: 'KeyB', label: 'B', name: 'Secure pouch', desc: 'Your most valuable item survives if you die', cost: 2000 },
 ];
 // weapons you can own: extract with one and it joins your armoury; bring it on a raid and it is at risk
-const GUNS = [['handcannon', '', '', 1000], ['lmg', '', '', 1600], ['lever', '', '', 950], ['crossbow', '', '', 1300], ['rifle', 'Digit2', '2', 900], ['shotgun', 'Digit3', '3', 700], ['sniper', 'Digit4', '4', 1200], ['launcher', 'Digit5', '5', 1500], ['smg', 'Digit6', '6', 700], ['dmr', 'Digit7', '7', 1100], ['slug_shotgun', 'Digit8', '8', 800]];
+const GUNS = [['burst_rifle', '', '', 1100], ['burst_pistol', '', '', 700], ['handcannon', '', '', 1000], ['lmg', '', '', 1600], ['lever', '', '', 950], ['crossbow', '', '', 1300], ['rifle', 'Digit2', '2', 900], ['shotgun', 'Digit3', '3', 700], ['sniper', 'Digit4', '4', 1200], ['launcher', 'Digit5', '5', 1500], ['smg', 'Digit6', '6', 700], ['dmr', 'Digit7', '7', 1100], ['slug_shotgun', 'Digit8', '8', 800]];
 // Contracts: two are offered each raid; a completed one pays its bonus only if you extract.
 // count contracts tick up from events; check contracts are judged from the raid's state (live, and at extraction).
 const CONTRACTS = [
@@ -249,7 +249,7 @@ export function init(ctx) {
     }
     for (const [x, z] of [[-9, 26], [44, 9], [-54, 5], [10, -44], [-10, -40], [52, -46], [-56, -36], [3, 4.5], [-4.5, -3], [30, 40], [-40, 12], [20, -4]]) spots.push(['standard', x, 0, z]);
     // arms lockers: one on the top floor of five random buildings, each holding a weapon you did not deploy with
-    const found = ['rifle', 'shotgun', 'sniper', 'launcher', 'smg', 'dmr', 'slug_shotgun', 'handcannon', 'lmg', 'lever', 'crossbow'].sort(() => Math.random() - 0.5);
+    const found = ['rifle', 'shotgun', 'sniper', 'launcher', 'smg', 'dmr', 'slug_shotgun', 'handcannon', 'lmg', 'lever', 'crossbow', 'burst_rifle', 'burst_pistol'].filter((id) => ctx.weapons && ctx.weapons.inventory.some((v) => v.def.id === id)).sort(() => Math.random() - 0.5);
     const outpost = (type) => world.buildings.find((b) => b.outpost === type);
     const armoury = outpost('armoury'), sites = armoury ? [[armoury, 1], [armoury, -1]] : [];
     for (const b of world.buildings.filter((b) => !b.outpost).sort(() => Math.random() - 0.5).slice(0, armoury ? 3 : 5)) sites.push([b, 1]);

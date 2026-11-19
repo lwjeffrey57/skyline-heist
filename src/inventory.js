@@ -21,7 +21,7 @@ const ICON = {
   rare: 'M6 3h12l4 6-10 12L2 9z',
   epic: 'M12 2l3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z',
 };
-const WEAPON_ICON = { pistol: 'pistol', rifle: 'rifle', smg: 'rifle', dmr: 'sniper', shotgun: 'shotgun', slug_shotgun: 'shotgun', sniper: 'sniper', launcher: 'launcher', handcannon: 'pistol', lmg: 'rifle', lever: 'sniper', crossbow: 'sniper' };
+const WEAPON_ICON = { pistol: 'pistol', rifle: 'rifle', smg: 'rifle', dmr: 'sniper', shotgun: 'shotgun', slug_shotgun: 'shotgun', sniper: 'sniper', launcher: 'launcher', burst_rifle: 'rifle', burst_pistol: 'pistol', handcannon: 'pistol', lmg: 'rifle', lever: 'sniper', crossbow: 'sniper' };
 const COLOR = { common: '#c9d1d9', uncommon: '#5fd38a', rare: '#5aa9ff', epic: '#d48bff', weapon: '#ff8a3c', med: '#9be37a', plate: '#7fb4ff', bag: '#ffc56b' };
 export const BAGS = { 4: { name: 'Sling pack', cost: 800 }, 8: { name: 'Field ruck', cost: 2000 } }; // backpacks add this many pack slots
 const SUPPLY = { med: { name: 'Medkit', cost: 150, desc: 'Heals 60. Press H in a raid.' }, plate: { name: 'Armour plate', cost: 300, desc: '+50 armour when you deploy.' } };
@@ -142,7 +142,7 @@ export function createInventory(ctx, api) {
     normalise();
     const risk = stash.pack.concat(stash.w, stash.b).reduce((a, it) => a + (it ? sellValue(it) : 0), 0);
     const pistol = defOf('pistol');
-    const shop = GUNS.map(([id, , , cost]) => ({ it: { t: 'weapon', id }, cost })).concat(Object.keys(SUPPLY).map((k) => ({ it: { t: k }, cost: SUPPLY[k].cost })), (W() && W().attachments ? W().attachments : []).map((a) => ({ it: { t: 'att', id: a.id }, cost: a.price })), Object.keys(BAGS).map((k) => ({ it: { t: 'bag', size: Number(k) }, cost: BAGS[k].cost })));
+    const shop = GUNS.filter(([id]) => defOf(id)).map(([id, , , cost]) => ({ it: { t: 'weapon', id }, cost })).concat(Object.keys(SUPPLY).map((k) => ({ it: { t: k }, cost: SUPPLY[k].cost })), (W() && W().attachments ? W().attachments : []).map((a) => ({ it: { t: 'att', id: a.id }, cost: a.price })), Object.keys(BAGS).map((k) => ({ it: { t: 'bag', size: Number(k) }, cost: BAGS[k].cost })));
     root.innerHTML = `
       <div>
         <h1>Skyline Heist</h1>
