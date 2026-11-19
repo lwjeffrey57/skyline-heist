@@ -491,7 +491,7 @@ export function init(ctx) {
     const tgt = S.pending >= 0 ? S.pending : S.idx;
     if (input.pressed.has('WheelDown')) switchTo(stepSlot(tgt, 1));
     if (input.pressed.has('WheelUp')) switchTo(stepSlot(tgt, -1));
-    if (input.pressed.has('KeyQ')) switchTo(S.last);
+    // Q is the dash (player.js); weapons change with the mouse wheel and the number keys
     if (input.pressed.has('KeyR')) startReload();
     if (input.pressed.has('KeyB') && w.modes.length > 1 && S.burstLeft <= 0) {
       it.mode = w.modes[(w.modes.indexOf(it.mode) + 1) % w.modes.length]; S.burstLeft = 0;
