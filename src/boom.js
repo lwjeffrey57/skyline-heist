@@ -4,7 +4,7 @@ import * as THREE from 'three';
 // style: a spiky comic burst and a shock ring with their own black outlines, chunky flat-coloured smoke, and pieces
 // of the chassis thrown outwards. Everything is pooled; nothing is created during play.
 
-const MAX = 5, PUFFS = 7, BITS = 11, FUSE = 0.32;
+const MAX = 5, PUFFS = 5, BITS = 7, FUSE = 0.32;
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 function burstTexture() { // a jagged star: black outline, orange, yellow, white core
@@ -46,7 +46,7 @@ export function init(ctx) {
   function boomSound(dist, size) {
     const dbg = ctx.audio && ctx.audio.debug, ac = dbg && dbg.context, G = dbg && dbg.graph;
     if (!ac || !G || !G.master || ac.state !== 'running' || dist > 90) return;
-    const vol = Math.min(1, 9 / Math.max(6, dist)) * 0.55 * size, t = ac.currentTime, len = 0.9;
+    const vol = Math.min(1, 9 / Math.max(6, dist)) * 0.36 * size, t = ac.currentTime, len = 0.9;
     const buf = ac.createBuffer(1, Math.ceil(ac.sampleRate * len), ac.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2.2);
     const n = ac.createBufferSource(), lp = ac.createBiquadFilter(), g = ac.createGain(), o = ac.createOscillator(), og = ac.createGain();
@@ -66,16 +66,16 @@ export function init(ctx) {
     toCam.copy(ctx.camera.position).sub(c).normalize(); e.burst.position.copy(c).addScaledVector(toCam, 0.9); // in front of its own smoke
     e.ring.position.set(c.x, e.floor + 0.08, c.z); e.ring.visible = true;
     const col = b && b.cfg && b.kindColor != null ? b.kindColor : (e.color || 0xff4a1c);
-    e.puffs.forEach((p, i) => { const a = (i / PUFFS) * Math.PI * 2 + Math.random(); p.position.set(c.x + Math.cos(a) * 0.3, c.y + rnd(-0.2, 0.5), c.z + Math.sin(a) * 0.3); p.userData.v.set(Math.cos(a) * rnd(1.2, 2.6), rnd(1.6, 3.4), Math.sin(a) * rnd(1.2, 2.6)); p.userData.s = rnd(0.55, 0.95) * size; p.rotation.set(Math.random() * 3, Math.random() * 3, 0); p.scale.setScalar(0.01); p.visible = true; });
+    e.puffs.forEach((p, i) => { const a = (i / PUFFS) * Math.PI * 2 + Math.random(); p.position.set(c.x + Math.cos(a) * 0.3, c.y + rnd(-0.2, 0.5), c.z + Math.sin(a) * 0.3); p.userData.v.set(Math.cos(a) * rnd(0.8, 1.7), rnd(1.2, 2.4), Math.sin(a) * rnd(0.8, 1.7)); p.userData.s = rnd(0.32, 0.55) * size; p.rotation.set(Math.random() * 3, Math.random() * 3, 0); p.scale.setScalar(0.01); p.visible = true; });
     e.bits.forEach((m, i) => {
-      const a = Math.random() * Math.PI * 2, up = rnd(3.5, 8.5), out = rnd(2.5, 7);
+      const a = Math.random() * Math.PI * 2, up = rnd(2.5, 5.5), out = rnd(1.5, 4.5);
       m.position.set(c.x, c.y + rnd(-0.3, 0.4), c.z); m.userData.v.set(Math.cos(a) * out, up, Math.sin(a) * out); m.userData.w.set(rnd(-9, 9), rnd(-9, 9), rnd(-9, 9));
       m.scale.set(rnd(0.1, 0.28) * size, rnd(0.08, 0.2) * size, rnd(0.12, 0.34) * size); m.userData.s0 = m.scale.clone();
       m.material.color.setHex(i % 3 === 0 ? col : i % 3 === 1 ? 0xd9d4c8 : 0x2a2d33); m.material.emissive.setHex(i % 3 === 0 ? col : 0x000000); m.material.emissiveIntensity = i % 3 === 0 ? 1.6 : 0; m.visible = true;
     });
-    light.position.copy(c); light.intensity = 60 * size; lightT = 0.22;
+    light.position.copy(c); light.intensity = 26 * size; lightT = 0.22;
     const dist = c.distanceTo(player.pos);
-    if (dist < 16 && player.dipV != null) player.dipV -= (1 - dist / 16) * 1.6 * size; // you feel the close ones
+    if (dist < 16 && player.dipV != null) player.dipV -= (1 - dist / 16) * 0.7 * size; // you feel the close ones
     boomSound(dist, size);
     events.emit('robotBoom', { point: c.clone(), size, bot: b });
   }
@@ -83,7 +83,7 @@ export function init(ctx) {
   events.on('botDied', (ev) => {
     const b = ev.bot; if (!b || !ev.point || b.kind === 'turret' || b.kind === 'drone' || b.faction === 'raider') return; // rival crews are people; turrets and drones already blow up
     let e = pool.find((x) => x.t < 0 && x.fuse <= 0); if (!e) { e = pool[0]; for (const x of pool) if (x.t > e.t) e = x; }
-    e.bot = b; e.pos.copy(ev.point); e.pos.y += 0.2; e.size = b.kind === 'heavy' || b.hvt ? 1.45 : b.kind === 'scout' ? 0.85 : 1; e.color = (b.cfg && b.cfg.color) || 0xff4a1c;
+    e.bot = b; e.pos.copy(ev.point); e.pos.y += 0.2; e.size = b.kind === 'heavy' || b.hvt ? 1.3 : b.kind === 'scout' ? 0.85 : 1; e.color = (b.cfg && b.cfg.color) || 0xff4a1c;
     e.fuse = FUSE; e.t = -1;
   });
   events.on('raidEnd', () => { gone.clear(); for (const e of pool) { e.t = -1; e.fuse = 0; for (const o of [e.burst, e.ring, ...e.puffs, ...e.bits]) o.visible = false; } light.intensity = 0; });
@@ -103,15 +103,15 @@ export function init(ctx) {
         e.t += dt; const t = e.t, sz = e.size;
         // burst: snaps out, holds a beat, then is gone
         // hard-edged shapes cannot fade, so the burst snaps out, holds a beat and collapses, like a drawn panel
-        const bs = (t < 0.08 ? t / 0.08 : t < 0.24 ? 1 + (t - 0.08) * 0.6 : Math.max(0, 1.1 * (1 - (t - 0.24) / 0.09))) * 4.8 * sz; e.burst.scale.set(Math.max(0.001, bs), Math.max(0.001, bs), 1);
+        const bs = (t < 0.08 ? t / 0.08 : t < 0.24 ? 1 + (t - 0.08) * 0.6 : Math.max(0, 1.1 * (1 - (t - 0.24) / 0.09))) * 2.7 * sz; e.burst.scale.set(Math.max(0.001, bs), Math.max(0.001, bs), 1);
         e.burst.visible = t < 0.33;
-        const rs = (1 - Math.pow(1 - Math.min(1, t / 0.45), 3)) * 9 * sz; e.ring.scale.set(rs, rs, 1);
+        const rs = (1 - Math.pow(1 - Math.min(1, t / 0.45), 3)) * 4.5 * sz; e.ring.scale.set(rs, rs, 1);
         e.ring.visible = t < 0.42;
         for (const p of e.puffs) {
           if (!p.visible) continue;
           const v = p.userData.v; v.multiplyScalar(Math.exp(-dt * 2.2)); v.y += dt * 0.6; p.position.addScaledVector(v, dt);
-          const k = t < 0.18 ? t / 0.18 : Math.max(0, 1 - (t - 0.18) / 1.25); p.scale.setScalar(Math.max(0.001, p.userData.s * (t < 0.18 ? k : 0.35 + 0.65 * k) * (t < 0.18 ? 1 : k > 0 ? 1 : 0)));
-          if (t > 1.43) p.visible = false;
+          const k = t < 0.18 ? t / 0.18 : Math.max(0, 1 - (t - 0.18) / 0.8); p.scale.setScalar(Math.max(0.001, p.userData.s * (t < 0.18 ? k : 0.35 + 0.65 * k) * (t < 0.18 ? 1 : k > 0 ? 1 : 0)));
+          if (t > 0.98) p.visible = false;
         }
         for (const m of e.bits) {
           if (!m.visible) continue;
