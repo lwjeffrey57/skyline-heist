@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import { WEAPONS } from './weapons/defs.js';
 
 // CASHOUT RUN: the fast mode. No stash, no looting, nothing to lose but the run.
-// Each round: grab the cash box, carry it to the deposit station, hold the station while it banks. Everything on site
+// Each round: grab the cash box, carry it to the deposit station, start the deposit and keep it from being stolen while it banks. Everything on site
 // comes for you. Bank it and pick one of three upgrades; the next round is harder and pays more. Go down and the run
 // is over: rounds, cash and your best are kept. Kills heal you, so pushing forward is how you stay alive.
 // ctx.run = { start(), active, state }   Uses the no-stakes path of the raid (ctx.rangeMode) plus ctx.runMode.
 
-const CFG = { bankTime: 18, bankPer: 2, bankMax: 30, radius: 9, pay: 1000, killPay: 25, healKill: 6, bots0: 5, botsPer: 2, botsMax: 22 };
+const CFG = { bankTime: 18, bankPer: 2, bankMax: 30, stealTime: 6, radius: 9, pay: 1000, killPay: 25, healKill: 6, bots0: 5, botsPer: 2, botsMax: 22 };
 const rnd = (a, b) => a + Math.random() * (b - a);
 const money = (n) => '$' + Math.round(n).toLocaleString('en-US');
 // enemy mix by round: [kind, first round it appears, weight, max alive]
@@ -17,7 +17,7 @@ const GUN_FIELDS = (w) => ({ damage: w.damage, rpm: w.rpm, mag: w.mag, brpm: w.b
 export function init(ctx) {
   const { player, world, events, scene } = ctx;
   let active = false, state = 'off', round = 0, cash = 0, kills = 0, bankT = 0, bankNeed = 0, huntT = 0, overAt = 0, best = 0, bestRound = 0;
-  let healKill = CFG.healKill, saved = null, box = null, station = null, mark = null, cards = [], picks = [];
+  let waveOn = false, healKill = CFG.healKill, saved = null, box = null, station = null, mark = null, cards = [], picks = [];
   try { const b = JSON.parse(localStorage.getItem('sh-run-best') || 'null'); if (b) { best = b.cash || 0; bestRound = b.round || 0; } } catch { /* storage unavailable */ }
 
   // ---- things in the world --------------------------------------------------------------------------------------
@@ -32,9 +32,10 @@ export function init(ctx) {
     const disc = new THREE.Mesh(new THREE.CircleGeometry(CFG.radius, 40), new THREE.MeshBasicMaterial({ color: 0x35ffd0, transparent: true, opacity: 0.12, depthWrite: false, fog: false }));
     disc.rotation.x = -Math.PI / 2; disc.position.y = 0.05;
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.5, 0.8), new THREE.MeshStandardMaterial({ color: 0x0c2a26, emissive: 0x35ffd0, emissiveIntensity: 1.6, roughness: 0.4 }));
-    post.position.y = 0.75; const b2 = mkBeam(0x35ffd0); b2.position.y = 35; stG.add(ring, disc, post, b2);
+    post.position.y = 0.75; const b2 = mkBeam(0x35ffd0); b2.position.y = 35; stG.add(ring, disc, post, b2); stG.userData.mats = [ring.material, disc.material, b2.material];
   }
   boxG.visible = stG.visible = false; scene.add(boxG, stG);
+  const stMats = stG.userData.mats;
 
   function pickSpot(from, dMin, dMax) {
     const lim = world.arenaHalf - 14, all = world.buildings.concat(world.outbuildings || []);
@@ -121,30 +122,82 @@ export function init(ctx) {
   }
   cardEl.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (c) pick(Number(c.dataset.i)); });
 
+  // ---- the steal: ONE enemy at a time goes for the station. It is marked from the moment it sets off. If it reaches the
+  // post it needs CFG.stealTime seconds there, and the deposit stands still meanwhile. Kill it and the attempt is over;
+  // let it finish and half of what was banked is pulled back out. Then a pause before anyone else tries.
+  const tag = (() => {
+    const S = 96, cv = document.createElement('canvas'); cv.width = cv.height = S; const g = cv.getContext('2d');
+    g.translate(48, 48); g.rotate(Math.PI / 4); g.fillStyle = '#0a0a0e'; g.fillRect(-30, -30, 60, 60); g.fillStyle = '#ff4a3a'; g.fillRect(-24, -24, 48, 48); g.rotate(-Math.PI / 4);
+    g.fillStyle = '#fff'; g.font = 'bold 44px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('$', 0, 3);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, alphaTest: 0.5, fog: false, toneMapped: false, depthTest: false })); sp.visible = false; sp.renderOrder = 10; scene.add(sp); return sp;
+  })();
+  let thief = null, thiefT = 0, thiefCd = 0, stealT = 0, thiefMark = null, nudgeT = 0, ringRed = false;
+  const stPos = new THREE.Vector3();
+  function dropThief(cd) {
+    if (thief) thief.errand = null;
+    thief = null; stealT = 0; thiefCd = cd; tag.visible = false;
+    const M = ctx.worldEvents && ctx.worldEvents.marks; if (M && thiefMark) { const i = M.indexOf(thiefMark); if (i >= 0) M.splice(i, 1); } thiefMark = null;
+  }
+  function stealTick(dt) {
+    const pause = Math.max(5, 9 - round * 0.4);
+    if (!thief) {
+      thiefCd -= dt; if (thiefCd > 0) return;
+      let bestB = null, bd = 1e9;
+      for (const b of ctx.bots.guards || ctx.bots.list) { if (!b.alive || b.special === 'marksman' || b.special === 'suppressor') continue; const d = Math.hypot(b.pos.x - station.x, b.pos.z - station.z); if (d < bd) { bd = d; bestB = b; } }
+      if (!bestB) { thiefCd = 2; return; }
+      thief = bestB; thiefT = 0; nudgeT = 0; thief.errand = { x: station.x, z: station.z };
+      thiefMark = { x: thief.pos.x, z: thief.pos.z, title: 'THIEF', css: '#ff4a3a', active: true }; if (ctx.worldEvents) ctx.worldEvents.marks.push(thiefMark);
+      say('One of them is going for the deposit', '#ff4a3a'); chime([330, 330], 0.09, 0.2, 0.16, 'square');
+      return;
+    }
+    if (!thief.alive) { const was = stealT > 0; dropThief(pause); if (was) { say('Steal stopped', '#35ffd0'); chime([660, 880], 0.07, 0.2, 0.16); } return; }
+    thiefT += dt; thiefMark.x = thief.pos.x; thiefMark.z = thief.pos.z;
+    const d = Math.hypot(thief.pos.x - station.x, thief.pos.z - station.z), k = Math.max(1.1, Math.min(3, Math.hypot(thief.pos.x - player.pos.x, thief.pos.z - player.pos.z) / 10));
+    tag.visible = true; tag.position.set(thief.pos.x, thief.pos.y + (thief.height || 1.9) + 0.45 + k * 0.2, thief.pos.z); tag.scale.set(k, k, 1);
+    if (d < 3.2) {
+      if (stealT === 0) { say('They are stealing the deposit. Kill the thief.', '#ff4a3a'); chime([440, 330, 440, 330], 0.1, 0.3, 0.2, 'square'); }
+      stealT += dt;
+      if (stealT >= CFG.stealTime) { bankT *= 0.5; dropThief(pause + 3); say('They pulled half of it back out', '#ff4a3a'); chime([262, 196], 0.14, 0.4, 0.18, 'sawtooth'); }
+    } else {
+      stealT = 0;
+      if (thiefT > 30) dropThief(3); // never got there: someone else can try
+    }
+  }
+
   // ---- rounds ------------------------------------------------------------------------------------------------------------
-  function setEnemies() {
+  // Pressure follows the objective: quiet while you look for the box, a few on your tail while you carry it, and the
+  // full wave only while the station is banking. Banking it clears the site, so there is always a breather after.
+  function setEnemies(phase) {
     const B = ctx.bots, c = B.config, K = c.kinds;
     for (const [kind, from, weight, max] of MIX) if (K[kind]) { K[kind].weight = round >= from ? weight * (kind === 'grunt' ? 1 : 1 + (round - from) * 0.15) : 0; K[kind].max = round >= from ? max + Math.floor((round - from) / 3) : 0; }
-    c.passiveShare = 0; c.respawnDelay = Math.max(3, 9 - round); c.damage = 6 + Math.min(6, (round - 1) * 0.6);
-    B.setCount(Math.min(CFG.botsMax, CFG.bots0 + CFG.botsPer * round));
-    if (B.setAggression) B.setAggression(Math.min(1, 0.3 + round * 0.1));
+    const wave = Math.min(CFG.botsMax, CFG.bots0 + CFG.botsPer * round);
+    c.passiveShare = 0; c.damage = 6 + Math.min(6, (round - 1) * 0.6);
+    c.respawnDelay = phase === 'bank' ? Math.max(3, 9 - round) : 25;
+    B.setCount(phase === 'bank' ? wave : phase === 'carry' ? Math.min(wave, 3 + Math.floor(round / 2)) : Math.min(wave, 2 + Math.floor(round / 3)));
+    if (B.setAggression) B.setAggression(phase === 'bank' ? Math.min(1, 0.3 + round * 0.1) : 0.1);
+  }
+  function clearSite() { // the deposit going through knocks out everything still standing
+    for (const b of (ctx.bots.guards || ctx.bots.list).slice()) if (b.alive && !b.isTurret) b.takeDamage(99999, { explosive: true, from: station ? new THREE.Vector3(station.x, 1, station.z) : player.pos.clone() });
   }
   function nextRound() {
-    round++; state = 'grab'; bankT = 0; bankNeed = Math.min(CFG.bankMax, CFG.bankTime + CFG.bankPer * (round - 1)); huntT = 3;
-    setEnemies();
+    round++; state = 'grab'; bankT = 0; bankNeed = Math.min(CFG.bankMax, CFG.bankTime + CFG.bankPer * (round - 1)); huntT = 20;
+    setEnemies('grab');
     const p = pickSpot(player.pos, 30, 55); box = p; boxG.position.set(p.x, 0, p.z); boxG.visible = true; stG.visible = false; station = null;
     setMark(p, 'CASH', '#ffc23a');
-    say(`Round ${round}: a cash box is down. Get it.`, '#ffc23a'); chime([440, 554], 0.1, 0.25, 0.16, 'triangle');
+    say(round === 1 ? 'Round 1: a cash box is down. Get it.' : `Site clear. Catch your breath, then find the next box. Round ${round}.`, '#ffc23a'); chime([440, 554], 0.1, 0.25, 0.16, 'triangle');
   }
   function grab() {
     state = 'carry'; boxG.visible = false;
     const p = pickSpot(box, 32, 60); station = p; stG.position.set(p.x, 0, p.z); stG.visible = true;
     setMark(p, 'DEPOSIT', '#35ffd0');
     say('You have the cash. Get it to the deposit station.', '#35ffd0'); chime([660, 880], 0.08, 0.25, 0.18);
-    if (ctx.bots.alertAll) ctx.bots.alertAll(player.pos);
+    setEnemies('carry'); huntT = 6; ringRed = false; for (const m of stMats) m.color.setHex(0x35ffd0);
   }
   function banked() {
     cash += CFG.pay * round; stG.visible = false; setMark(null);
+    dropThief(0); clearSite(); setEnemies('grab'); waveOn = false;
+    if (!player.downed) player.hp = Math.min(player.maxHp, player.hp + 30);
     chime([520, 660, 780, 1040], 0.09, 0.4, 0.2); if (ctx.slowmo) ctx.slowmo(0.3, 0.5);
     showCards();
   }
@@ -155,7 +208,7 @@ export function init(ctx) {
     const c = ctx.bots.config;
     saved = { guns: WEAPONS.map(GUN_FIELDS), kinds: Object.fromEntries(Object.entries(c.kinds).map(([k, v]) => [k, [v.weight, v.max]])), passive: c.passiveShare, squads: c.raiders ? c.raiders.squads : null };
     if (c.raiders) c.raiders.squads = 0;
-    ctx.rangeMode = true; ctx.runMode = true; active = true; round = 0; cash = 0; kills = 0; picks = []; healKill = CFG.healKill; endEl.hidden = true;
+    ctx.rangeMode = true; ctx.runMode = true; active = true; round = 0; cash = 0; kills = 0; picks = []; waveOn = false; healKill = CFG.healKill; endEl.hidden = true;
     ctx.raid.deploy();
     if (ctx.bots.clearRaiders) ctx.bots.clearRaiders();
     player.noRegen = true; player.dashCdMul = 1;
@@ -179,7 +232,7 @@ export function init(ctx) {
     if (record) { best = cash; bestRound = round; try { localStorage.setItem('sh-run-best', JSON.stringify({ cash: best, round: bestRound })); } catch { /* storage unavailable */ } }
     endEl.innerHTML = `<div class="big">${record && cash > 0 ? 'NEW BEST' : 'RUN OVER'}</div>Reached round <b>${round}</b> · banked <b>${money(cash)}</b> · <b>${kills}</b> kills · best <b>${money(best)}</b>${picks.length ? `<br><span style="opacity:.7">Build: ${picks.join(', ')}</span>` : ''}`;
     endEl.hidden = false;
-    active = false; state = 'off'; hud.hidden = true; cardEl.hidden = true; boxG.visible = stG.visible = false; setMark(null);
+    dropThief(0); active = false; state = 'off'; hud.hidden = true; cardEl.hidden = true; boxG.visible = stG.visible = false; setMark(null);
     ctx.freeze = false; ctx.uiOpen = false;
     restore();
     ctx.raid.endRange(); ctx.rangeMode = false; ctx.runMode = false;
@@ -200,21 +253,31 @@ export function init(ctx) {
       if (player.downed || !player.alive) { state = 'over'; overAt = performance.now(); if (ctx.slowmo) ctx.slowmo(0.25, 2.5); l2.textContent = 'You are down'; bar.hidden = true; return; }
       if (state === 'pick') return;
       const P = player.pos, t = ctx.time;
-      huntT -= dt; if (huntT <= 0) { huntT = state === 'bank' ? 4 : 7; ctx.bots.hunt(P, state === 'grab' ? 3 + round : 99); }
+      huntT -= dt;
+      if (huntT <= 0) { // who is sent after you: nobody early on while you search, one or two while you carry, everyone during the wave
+        if (waveOn) { huntT = 4; ctx.bots.hunt(P, 99); } else if (state === 'grab') { huntT = 18; if (round >= 3) ctx.bots.hunt(P, 1); } else { huntT = 10; ctx.bots.hunt(P, 1 + Math.floor(round / 4)); }
+      }
       let goal = '';
       if (state === 'grab') {
         const d = Math.hypot(P.x - box.x, P.z - box.z); boxG.userData.cube.rotation.y = t * 1.5; boxG.userData.cube.position.y = 0.8 + Math.sin(t * 3) * 0.08;
         goal = `Grab the cash box · ${Math.round(d)} m`;
         if (d < 1.8 && Math.abs(P.y) < 2.5) grab();
       } else {
-        const d = Math.hypot(P.x - station.x, P.z - station.z), inside = d < CFG.radius && P.y < 4;
-        if (inside) { if (state !== 'bank') { state = 'bank'; say('Depositing. Hold the station.', '#35ffd0'); huntT = 0; } bankT += dt; }
-        else { if (state === 'bank') state = 'carry'; bankT = Math.max(0, bankT - dt * 0.5); }
-        goal = inside ? `Hold the station · ${Math.ceil(bankNeed - bankT)} s` : bankT > 0 ? `Get back in the ring · ${Math.round(d)} m` : `Carry it to the deposit · ${Math.round(d)} m`;
+        const d = Math.hypot(P.x - station.x, P.z - station.z);
+        if (state === 'carry') { // walking into the ring starts the deposit; after that you fight from wherever you like
+          goal = `Carry it to the deposit · ${Math.round(d)} m`;
+          if (d < CFG.radius && P.y < 4) { state = 'bank'; waveOn = true; setEnemies('bank'); huntT = 2.5; thiefCd = 6; say('Depositing. You do not have to stay in the ring: stop anyone who tries to steal it.', '#ff9a3c'); chime([220, 196, 175], 0.16, 0.4, 0.2, 'sawtooth'); }
+        } else {
+          stealTick(dt);
+          if (stealT > 0) goal = `STEAL IN PROGRESS · kill the thief · ${Math.ceil(CFG.stealTime - stealT)} s`;
+          else { bankT += dt; goal = `Depositing · ${Math.ceil(bankNeed - bankT)} s${thief ? ' · a thief is heading for it' : ''}`; }
+        }
         if (bankT >= bankNeed) { banked(); return; }
       }
       l1.innerHTML = `ROUND ${round} <i>·</i> ${money(cash)} <i>·</i> BEST ${money(Math.max(best, cash))}`;
-      l2.textContent = goal; bar.hidden = !(bankT > 0); fill.style.width = `${Math.min(100, (bankT / bankNeed) * 100)}%`;
+      const steal = stealT > 0;
+      l2.textContent = goal; l2.style.color = steal ? '#ff5a4a' : ''; bar.hidden = state !== 'bank'; fill.style.width = `${Math.min(100, (bankT / bankNeed) * 100)}%`; fill.style.background = steal ? '#ff5a4a' : '#35ffd0';
+      if (steal !== ringRed) { ringRed = steal; for (const m of stMats) m.color.setHex(steal ? 0xff4a3a : 0x35ffd0); }
     },
   };
 }

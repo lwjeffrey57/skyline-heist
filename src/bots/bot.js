@@ -1334,6 +1334,14 @@ export class Bot {
       this.pos.set(D.x, D.y, D.z); this.vel.set(0, 0, 0); this.body.grounded = true; this.state = 'patrol'; this.target = null; this.telling = false; this.burstLeft = 0; this.alertState = 'alert';
       this.bodyYaw = this.aimYaw = Math.atan2(P.x - D.x, P.z - D.z); this.aimPitch = 0; this.aimingPose = 0;
       if (this.special === 'shield') this.shieldUp = this.shieldDownT <= 0 && this.stagT <= 0;
+    } else if (this.errand) { // sent to a spot (the deposit thief): runs straight there, ignoring the fight, and stands on it
+      const E = this.errand, far = Math.hypot(this.pos.x - E.x, this.pos.z - E.z) > 2.2;
+      this.state = 'patrol'; this.target = null; this.telling = false; this.burstLeft = 0; this.lookMove = true; this.alertState = 'alert';
+      E.t = (E.t || 0) - dt;
+      if (!far) { if (this.path || this.pathReq) this.clearPath(); }
+      else if (E.t <= 0 || (!this.path && !this.pathReq)) { E.t = 2.5; this.moveTo(TMP3.set(E.x, E.y || 0, E.z), cfg.sprintSpeed, {}); }
+      this.aim(dt); this.move(dt);
+      if (!this.alive) return;
     } else {
     const T0 = this.target;
     if (T0 && T0.isBot && (!T0.alive || T0.faction === this.faction)) this.loseTarget(true); // the bot I was fighting is down / gone
