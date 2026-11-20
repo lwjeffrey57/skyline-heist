@@ -1329,6 +1329,12 @@ export class Bot {
       if (this.telling || this.burstLeft > 0) this.shieldDownT = Math.max(this.shieldDownT, cfg.shieldDropAfter);
       this.shieldUp = this.shieldDownT <= 0 && this.stagT <= 0 && this.state !== 'patrol';
     }
+    if (this.dummy) {
+      const D = this.dummy, P = this.ctx.player.pos;
+      this.pos.set(D.x, D.y, D.z); this.vel.set(0, 0, 0); this.body.grounded = true; this.state = 'patrol'; this.target = null; this.telling = false; this.burstLeft = 0; this.alertState = 'alert';
+      this.bodyYaw = this.aimYaw = Math.atan2(P.x - D.x, P.z - D.z); this.aimPitch = 0; this.aimingPose = 0;
+      if (this.special === 'shield') this.shieldUp = this.shieldDownT <= 0 && this.stagT <= 0;
+    } else {
     const T0 = this.target;
     if (T0 && T0.isBot && (!T0.alive || T0.faction === this.faction)) this.loseTarget(true); // the bot I was fighting is down / gone
     this.percT -= dt;
@@ -1352,6 +1358,7 @@ export class Bot {
     this.move(dt);
     if (!this.alive) return;
     this.fire(dt);
+    }
 
     a.bodyYaw = this.bodyYaw; a.aimYaw = this.aimYaw; a.aimPitch = this.aimPitch + this.recoil; a.grounded = this.body.grounded || this.body.coyote > 0;
     a.aiming = this.aimingPose; a.hp01 = this.hp / this.maxHp; a.showBar = this.hurtT < 3.5 && this.hp < this.maxHp;

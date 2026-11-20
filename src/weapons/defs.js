@@ -148,22 +148,6 @@ WEAPONS.push(
     recoil: { ...base('rifle').recoil, pattern: scaleRecoil(base('rifle').recoil.pattern, 0.7) },
     ads: { ...base('rifle').ads, fov: 0.82, time: 0.11, move: 0.95 },
   },
-  { // semi-automatic marksman rifle: two headshots or three body shots, slow to follow up
-    ...base('rifle'), id: 'dmr', name: 'HARRIER DMR', tag: 'Marksman rifle', accent: '#9be37a',
-    modes: ['semi'], rpm: 300, burst: undefined, damage: 52, headMult: 2.0, falloff: [50, 110, 0.75], range: 500,
-    mag: 12, reserve: 72, killRefund: 12,
-    reload: { ...base('rifle').reload, time: 1.85 },
-    equip: 0.32, sprintOut: 0.14, mobility: 0.97,
-    spread: { ...base('rifle').spread, move: 1.6, air: 2.6, bloom: 0.9, bloomMax: 2.6, decay: 6 },
-    recoil: { ...base('rifle').recoil, pattern: [[2.4, 0.2], [2.2, -0.3], [2.3, 0.25]], loop: 3, recover: 8 },
-    kick: { ...base('rifle').kick, z: 0.06, rx: 0.05, cam: 0.008, fov: 1.1 },
-    ads: { ...base('rifle').ads, fov: 0.5, time: 0.19, move: 0.7 },
-  },
-  { // one heavy slug instead of pellets: a pump gun that reaches across a street
-    ...base('shotgun'), id: 'slug_shotgun', name: 'BRAMBLE SLUG', tag: 'Slug gun', accent: '#c98bff',
-    pellets: 1, damage: 96, headMult: 1.5, falloff: [22, 60, 0.5], range: 300,
-    spread: { ...base('shotgun').spread, hip: 0.5, ads: 0.0, bloom: 0.8 },
-  },
 );
 
 // ---- four guns with their own models and actions (viewmodels2.js) ------------------------------------------------

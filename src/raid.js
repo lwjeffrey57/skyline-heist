@@ -73,6 +73,10 @@ function loadStash() {
   let s = base;
   try { s = { ...base, ...JSON.parse(localStorage.getItem('sh-stash') || '{}') }; } catch { /* storage unavailable */ }
   // the page was closed or reloaded in the middle of a raid: that counts as a lost raid, so what was carried is gone
+  // two guns were cut: a saved one becomes the gun that kept its role, and what was fitted to it goes back in the stash
+  const GONE = { dmr: 'lever', slug_shotgun: 'handcannon' }, swap = (it) => { if (it && GONE[it.id] && (it.t === 'weapon' || it.t == null)) it.id = GONE[it.id]; };
+  for (const list of [s.grid, s.pack, s.w]) if (Array.isArray(list)) list.forEach(swap);
+  if (s.att) for (const id in GONE) { for (const a of s.att[id] || []) { if (!a) continue; const k = Array.isArray(s.grid) ? s.grid.indexOf(null) : -1; if (k >= 0) s.grid[k] = typeof a === 'string' ? { t: 'att', id: a } : a; } delete s.att[id]; }
   if (s.inRaid) { s.inRaid = false; s.lost++; s.pack = []; s.w = [null, null]; }
   return s;
 }
@@ -421,12 +425,12 @@ export function init(ctx) {
     state = 'raid'; timeLeft = RAID.time + (stash.upgrades.time ? 90 : 0); pack = []; holdT = 0; exitT = 0; result = null; reveal = null; raidGuns.clear();
     // everything in the pack comes along: supplies are put to use, valuables ride in the pack (and are at risk)
     medkits = baseMed(); armor = baseArmor(); broughtMed = 0; brought.clear(); revives = 0; broughtRev = 0;
-    for (const it of stash.pack || []) {
+    for (const it of ctx.rangeMode ? [] : stash.pack || []) {
       if (!it) continue;
       if (it.t === 'med') { medkits++; broughtMed++; } else if (it.t === 'revive') { revives++; broughtRev++; } else if (it.t === 'plate') armor = Math.min(100, armor + 50);
       else if (it.t === 'loot') pack.push({ name: it.name, tier: it.tier, value: it.value });
     }
-    stash.pack = (stash.pack || []).map(() => null); stash.inRaid = true;
+    if (!ctx.rangeMode) { stash.pack = (stash.pack || []).map(() => null); stash.inRaid = true; } // the firing range risks nothing
     const points = world.spawnPoints || SPAWNS; // at the edge of the site, outside the built-up centre
     let free = points.filter(([x, z]) => player.free(x, 0.01, z, 1.8));
     const quiet = free.filter(([x, z]) => !world.buildings.some((b) => Math.hypot(b.x - x, b.z - z) < 46)); // not on an outpost's doorstep
@@ -446,7 +450,8 @@ export function init(ctx) {
       for (const v of inv) { v.locked = v.def.id !== start; v.mag = v.def.mag; v.reserve = v.def.reserve; }
       const sidearm = inv.find((v) => v.def.id === 'pistol'); if (sidearm) sidearm.def.suppressed = !!stash.upgrades.suppressor;
       // weapons chosen on the stash screen leave the armoury now; they only come back if you extract
-      for (const it of stash.w || []) { const slot = it && inv.find((v) => v.def.id === it.id); if (slot) { slot.locked = false; brought.add(it.id); } }
+      for (const it of ctx.rangeMode ? [] : stash.w || []) { const slot = it && inv.find((v) => v.def.id === it.id); if (slot) { slot.locked = false; brought.add(it.id); } }
+      if (ctx.rangeMode) for (const v of inv) v.locked = false; // every gun is on the table
       if (ctx.weapons.setAttachments) for (const v of inv) { // fit what the stash says is on each gun; guns found in the raid are bare
         const names = ctx.weapons.slotsFor(v.def.id), fitted = (stash.att && stash.att[v.def.id]) || [], set = {};
         if (!v.locked) names.forEach((sn, i) => { if (fitted[i]) set[sn] = fitted[i].id; });
@@ -458,7 +463,7 @@ export function init(ctx) {
     placeCrates(); setBots(true);
     panel.hidden = true; if (menu) menu.hide();
     events.emit('raidStart', {});
-    if (world.fixed && stash.lostPack) { // one chance to get back what you dropped last time
+    if (world.fixed && stash.lostPack && !ctx.rangeMode) { // one chance to get back what you dropped last time
       const lp = stash.lostPack, L = addLootable('bag', lp.x, floorBelow(lp.x, lp.y + 0.5, lp.z), lp.z, 0, lp.items.slice());
       L.items = lp.items.slice(); L.born = ctx.time + 1e6; L.lost = true;
       if (ctx.worldEvents) { lostMark = { x: lp.x, z: lp.z, title: 'YOUR PACK', css: '#8ff0c8', active: true, loot: L }; ctx.worldEvents.marks.push(lostMark); }
@@ -473,6 +478,11 @@ export function init(ctx) {
   }
   function endRaid(kind) {
     if (state !== 'raid') return;
+    if (ctx.rangeMode) { // leaving the firing range: nothing is won or lost
+      state = 'stash'; pack = []; raidGuns.clear(); closePack(false); setBots(false);
+      zones.forEach((zn) => { zn.group.visible = false; zn.mark.hidden = true; });
+      hold.hidden = true; clearLootables(); events.emit('raidEnd', { kind: 'range', value: 0 }); return;
+    }
     const value = packValue();
     const nameOf = (id) => { const s = ctx.weapons && ctx.weapons.inventory.find((v) => v.def.id === id); return s ? s.def.name : id; };
     const items = pack.slice().sort((a, b) => b.value - a.value), guns = [...raidGuns].filter((id) => !brought.has(id)).map(nameOf);
@@ -650,8 +660,9 @@ export function init(ctx) {
     stash, save: () => saveStash(stash), GUNS, shopGuns: SHOP_GUNS, UPGRADES, packSize, chime,
     contractsHtml: () => contractRows(false),
     onDeploy: () => { deploy(); const o = document.getElementById('overlay'); if (o) o.click(); }, // the click also captures the mouse
+    onRange: () => { if (ctx.range) { ctx.range.start(); const o = document.getElementById('overlay'); if (o) o.click(); } },
   });
-  ctx.raid = { prizeGun, get revives() { return revives; }, useRevive() { if (revives <= 0) return false; revives--; return true; }, toast, chime, addLootable, rollContents, districtAt, get heat() { return ctx.heat ? ctx.heat.frac : 0; }, get heatTier() { return ctx.heat ? ctx.heat.tier : 1; }, menu, config: RAID, stash, get state() { return state; }, get pack() { return pack; }, get timeLeft() { return timeLeft; }, set timeLeft(t) { timeLeft = t; }, lootables, zones, deploy, endRaid, get armor() { return armor; }, get contracts() { return contracts; }, get keycards() { return keycards; }, get revealT() { return revealT; }, get packOpen() { return packOpen; }, get bagBonus() { return bagBonus; }, packSize, set keycards(n) { keycards = n; }, get phase() { const t = ctx.heat ? ctx.heat.tier : 1; return t >= 4 ? 2 : t >= 2 ? 1 : 0; }, setContracts(ids) { contracts = ids.map((id) => ({ def: CONTRACTS.find((c) => c.id === id), n: 0, done: false })); }, get medkits() { return medkits; } };
+  ctx.raid = { endRange: () => endRaid('range'), prizeGun, get revives() { return revives; }, useRevive() { if (revives <= 0) return false; revives--; return true; }, toast, chime, addLootable, rollContents, districtAt, get heat() { return ctx.heat ? ctx.heat.frac : 0; }, get heatTier() { return ctx.heat ? ctx.heat.tier : 1; }, menu, config: RAID, stash, get state() { return state; }, get pack() { return pack; }, get timeLeft() { return timeLeft; }, set timeLeft(t) { timeLeft = t; }, lootables, zones, deploy, endRaid, get armor() { return armor; }, get contracts() { return contracts; }, get keycards() { return keycards; }, get revealT() { return revealT; }, get packOpen() { return packOpen; }, get bagBonus() { return bagBonus; }, packSize, set keycards(n) { keycards = n; }, get phase() { const t = ctx.heat ? ctx.heat.tier : 1; return t >= 4 ? 2 : t >= 2 ? 1 : 0; }, setContracts(ids) { contracts = ids.map((id) => ({ def: CONTRACTS.find((c) => c.id === id), n: 0, done: false })); }, get medkits() { return medkits; } };
   setBots(false); player.protectT = 1e9;
   panel.hidden = true; menu.show(); saveStash(stash);
 
@@ -674,8 +685,9 @@ export function init(ctx) {
         }
         return;
       }
-      top.hidden = false; kit.hidden = false; cbox.hidden = false;
+      top.hidden = false; kit.hidden = false; cbox.hidden = !!ctx.rangeMode;
       if (tick10++ % 10 === 0) cbox.innerHTML = `<div class="h">Contracts</div>${contractRows(false)}`;
+      if (ctx.rangeMode) timeLeft = RAID.time;
       timeLeft -= dt; healCd -= dt;
       if (timeLeft <= 0) { endRaid('mia'); return; }
 

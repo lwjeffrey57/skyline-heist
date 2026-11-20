@@ -89,7 +89,7 @@ export function init(ctx) {
 
   let tick = 0;
   function update(dt) {
-    if (!active) return;
+    if (!active || ctx.rangeMode) return;
     tick++;
     // population: one may be out from the start; lockdown brings another
     if (ctx.raid && ctx.raid.phase >= 2 && !lockdownAdded) { lockdownAdded = true; wantCount++; respawnT = Math.min(respawnT, 4); }

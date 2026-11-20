@@ -22,9 +22,10 @@ import * as boom from './boom.js';
 import * as melee from './melee.js';
 import * as drones from './drones.js';
 import * as turrets from './turrets.js';
+import * as range from './range.js';
 import * as heat from './heat.js';
 import * as worldevents from './worldevents.js';
-import * as raid from './raid.js'; // director.js (free-for-all deathmatch) is kept in the repo but not loaded
+import * as raid from './raid.js';
 
 // Integration only: builds the shared ctx (see core.js) and runs every system each frame.
 
@@ -56,7 +57,7 @@ events.on('pieceSplit', ({ collider, parts }) => {
 events.on('pieceDestroyed', ({ collider }) => { if (collider.zipline) world.removeZipline(collider.zipline); });
 
 const systems = [];
-for (const [name, mod] of Object.entries({ destruction, decor, fx, audio, weapons, bots, raid, heat, worldevents, detect, ui, hudplus, dash, downed, boom, melee, dmgnum, settings, map, drones, turrets })) {
+for (const [name, mod] of Object.entries({ destruction, decor, fx, audio, weapons, bots, raid, heat, worldevents, detect, ui, hudplus, dash, downed, boom, melee, dmgnum, settings, map, drones, turrets, range })) {
   try { const s = mod.init(ctx); if (s) systems.push({ name, ...s }); } catch (e) { console.error(`[${name}] init failed`, e); }
 }
 
@@ -135,7 +136,7 @@ function step(dt) {
 
 // Emphasis: a few frames of freeze on a kill (the view still turns with the mouse), a short slow-motion beat on the big moments.
 let stopT = 0, slowT = 0, slowK = 1;
-ctx.hitstop = (sec) => { stopT = Math.max(stopT, Math.min(0.12, sec)); };
+ctx.hitstop = (sec) => { stopT = Math.max(stopT, Math.min(0.2, sec * (ctx.tune ? ctx.tune.stop : 1))); };
 ctx.slowmo = (k, sec) => { slowK = k; slowT = Math.max(slowT, sec); };
 const HEAVY_GUN = /LONGHAND|ROOK|KESTREL|NIGHTJAR|BRAMBLE|HARRIER|DOORKNOCKER|PUCK/;
 ctx.events.on('killConfirm', (e) => {

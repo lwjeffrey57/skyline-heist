@@ -18,7 +18,10 @@ Consequences already decided:
 - Enemy types must each demand a different response from the player, not just more bullets.
 - Intensity should rise and fall: after a hard fight the game allows a lull; when it has been quiet too long it stirs.
 - The map is fixed and learnable (src/world2.js, a blockout for now). Things may persist between raids.
-- Design by subtraction: features that do not serve the vision get cut.
+- Design by subtraction: features that do not serve the vision get cut. Cut so far: the two traders, the two
+  recoloured guns (one gun per role), the deathmatch mode. Resting only heals to 40%; the rest takes a medkit.
+- Gun feel is tuned by the player in the firing range (src/range.js, button on the stash screen); their numbers
+  are pasted back and baked into src/weapons/defs.js.
 
 ## Pillars, in priority order
 1. **The gunplay must feel amazing.** Shooting an enemy has to be a pleasure in itself: enemies visibly and audibly

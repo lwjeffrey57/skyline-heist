@@ -162,6 +162,7 @@ export function createInventory(ctx, api) {
         <div class="grid" style="grid-template-columns:repeat(4,1fr)">${stash.pack.map((it, i) => slot('pack', i, it)).join('')}</div>
         <button class="mini" data-act="store">Move pack to stash</button> <button class="mini" data-act="sellpack">Sell pack valuables</button>
         <button class="deploy" data-act="deploy">Deploy</button>
+        <button class="deploy" data-act="range" style="margin-top:6px;background:transparent;border:1px solid rgba(255,255,255,.35);color:#fff;font-size:12px;padding:8px">Firing range · try and tune every gun</button>
       </div>
       <div>
         <h3 style="margin-top:4px">Stash — ${stash.grid.filter(Boolean).length}/${STASH_SLOTS}</h3>
@@ -171,7 +172,7 @@ export function createInventory(ctx, api) {
         <div class="contracts">${contractsHtml()}</div>
       </div>
       <div>
-        <div class="tabs">${[['shop', 'Shop'], ['traders', 'Traders'], ['base', 'Base'], ['settings', 'Settings']].map(([id, label]) => `<span class="${tab === id ? 'on' : ''}" data-tab="${id}">${label}</span>`).join('')}</div>
+        <div class="tabs">${[['shop', 'Shop'], ['base', 'Base'], ['settings', 'Settings']].map(([id, label]) => `<span class="${tab === id ? 'on' : ''}" data-tab="${id}">${label}</span>`).join('')}</div>
         ${tab === 'shop' ? `<h3 style="margin-top:10px">Click to buy</h3><p style="margin:0 0 6px;font-size:11px;letter-spacing:1px;opacity:.65">Basics only. The best guns and parts are out there: lockers, the commander, rival crews, supply drops.</p><div class="shop">${shop.map((s, i) => `<div class="slot ${stash.credits < s.cost ? 'short' : ''}" data-buy="${i}">${tile(s.it)}<span class="vl" style="position:absolute;left:3px;bottom:2px;font-size:9px;color:#ffc56b">${s.cost}</span></div>`).join('')}</div>` : ''}
         ${tab === 'traders' ? TRADERS.map((tr) => {
           const st = taskState(stash, tr), t = st.task;
@@ -255,6 +256,7 @@ export function createInventory(ctx, api) {
     } else if (act && act.dataset.act === 'store') {
       stash.pack.forEach((it, i) => { if (it && stash.grid.indexOf(null) >= 0) { addToStash(it); stash.pack[i] = null; } }); chime([520], 0.05, 0.08, 0.1);
     } else if (act && act.dataset.act === 'deploy') { save(); onDeploy(); return; }
+    else if (act && act.dataset.act === 'range') { save(); if (api.onRange) api.onRange(); return; }
     else return;
     save(); render();
   });

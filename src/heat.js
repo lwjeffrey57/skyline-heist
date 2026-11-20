@@ -37,7 +37,7 @@ export function init(ctx) {
 
   function apply() {
     const T = TIERS[tier - 1], raid = ctx.raid;
-    if (ctx.bots && raid) {
+    if (ctx.bots && raid && !ctx.rangeMode) {
       ctx.bots.config.respawnDelay = T.respawn * (lullT > 0 ? 2.5 : 1);
       ctx.bots.setCount(raid.config.bots + T.bots);
       if (ctx.bots.setAggression) ctx.bots.setAggression(T.aggr);
@@ -62,7 +62,7 @@ export function init(ctx) {
     events.emit('heatTier', { tier, name: T.name });
   }
   function add(n) {
-    if (!active) return;
+    if (!active || ctx.rangeMode) return;
     value = Math.max(0, Math.min(100, value + n));
     while (tier < TIERS.length && value >= TIERS[tier].at) { tier++; rise(); }
   }
@@ -91,7 +91,7 @@ export function init(ctx) {
 
   return {
     update(dt) {
-      if (!active || !ctx.raid || ctx.raid.state !== 'raid') { bar.hidden = true; return; }
+      if (!active || !ctx.raid || ctx.raid.state !== 'raid' || ctx.rangeMode) { bar.hidden = true; return; }
       // hunting parties: from Alarm upward, guards are sent to where you are every so often
       pressure = Math.max(0, pressure - dt * 0.035);
       if (lullT > 0) { lullT -= dt; if (lullT <= 0) apply(); }

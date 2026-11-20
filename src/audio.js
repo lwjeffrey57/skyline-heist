@@ -292,6 +292,7 @@ export function init(ctx) {
   // non-positional one-shot (the player's own actions). tilt = random high-shelf dB spread for timbre variety
   function play2(name, vol = 1, pan = 0, tilt = 0, rateMul = 1, delay = 0, sendMul = 1) {
     if (!usable(name)) return;
+    if (ctx.tune) vol *= name.startsWith('sub_') ? ctx.tune.sub : name.startsWith('mech_') ? ctx.tune.mech : name.startsWith('rec_') || name.startsWith('gun_') ? ctx.tune.shot : 1;
     const d = D[name], now = ac.currentTime, v = grab(G.v2, name, d, now);
     if (!v) return;
     const src = source(v, name, d, now, rateMul);

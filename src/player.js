@@ -123,7 +123,7 @@ export class Player {
     const inp = this.input;
     this.slideCd -= dt; this.mantleCd -= dt; this.padCd -= dt;
     if (this.protectT > 0) this.protectT -= dt;
-    this.hurtT += dt; if (this.hurtT > 5 && this.hp < this.maxHp && !this.downed) this.hp = Math.min(this.maxHp, this.hp + 25 * dt);
+    this.hurtT += dt; if (this.hurtT > 5 && this.hp < this.maxHp * 0.4 && !this.downed) this.hp = Math.min(this.maxHp * 0.4, this.hp + 25 * dt); // rest only brings you back to 40%: the rest takes a medkit
     if (inp.pressed.has('Space')) this.jumpBuffer = 0.14; else this.jumpBuffer -= dt;
     if ((inp.pressed.has('KeyK') && !this.noManualRespawn) || this.pos.y < -30) this.respawn();
 

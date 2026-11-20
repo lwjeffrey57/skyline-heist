@@ -1,5 +1,4 @@
-// Long-term progression between raids: a base you build up with credits and specific loot, and two traders who set
-// tasks and pay out gear. Everything is stored in the saved stash.
+// Long-term progression between raids: a base you build up with credits and specific loot. Everything is stored in the saved stash.
 
 // Each level sets a flag in stash.upgrades that the raid reads. `need` is loot that must be in the stash to build it.
 export const STATIONS = [
@@ -17,21 +16,8 @@ export const STATIONS = [
     { flag: 'time', desc: '+90 s on the raid clock', cost: 2000, need: [['Data Slate', 2]] }] },
 ];
 
-// Tasks come one at a time. `stat` tasks count things you do in raids; `handin` tasks take items from your stash.
-export const TRADERS = [
-  { id: 'vance', name: 'Quartermaster Vance', blurb: 'Arms and kit. Pays in hardware.', tasks: [
-    { text: 'Hand in 3 common valuables', handin: { tier: 'common', n: 3 }, reward: { cr: 400, items: [{ t: 'bag', size: 4 }] } },
-    { text: 'Extract with a weapon taken from an arms locker', stat: 'foundGun', n: 1, reward: { cr: 300, items: [{ t: 'weapon', id: 'smg' }] } },
-    { text: 'Kill 5 guards with the pistol', stat: 'pistolKill', n: 5, reward: { cr: 800, items: [{ t: 'med' }, { t: 'med' }] } },
-    { text: 'Hand in a rare valuable', handin: { tier: 'rare', n: 1 }, reward: { cr: 600, items: [{ t: 'weapon', id: 'dmr' }] } },
-    { text: 'Kill 3 heavies', stat: 'heavyKill', n: 3, reward: { cr: 1500, items: [{ t: 'weapon', id: 'launcher' }] } }] },
-  { id: 'ilse', name: 'Broker Ilse', blurb: 'Information and valuables. Pays in credits.', tasks: [
-    { text: 'Tap a signal terminal', stat: 'terminal', n: 1, reward: { cr: 500, items: [] } },
-    { text: 'Open the strongroom', stat: 'strongroom', n: 1, reward: { cr: 1000, items: [{ t: 'plate' }] } },
-    { text: 'Reach a streak of 3 extractions', stat: 'streak3', n: 1, reward: { cr: 1200, items: [{ t: 'bag', size: 8 }] } },
-    { text: 'Shoot down 2 hunter drones', stat: 'droneKill', n: 2, reward: { cr: 900, items: [] } },
-    { text: 'Hand in the Black Ledger', handin: { name: 'Black Ledger', n: 1 }, reward: { cr: 5000, items: [] } }] },
-];
+// The two traders and their task lists were cut (design by subtraction); the empty list keeps old saves loading.
+export const TRADERS = [];
 
 const matches = (it, h) => it && it.t === 'loot' && (h.name ? it.name === h.name : it.tier === h.tier);
 export const countItem = (stash, name) => (stash.grid || []).filter((it) => it && it.t === 'loot' && it.name === name).length;

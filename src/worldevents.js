@@ -107,7 +107,7 @@ export function init(ctx) {
 
   return {
     update(dt) {
-      if (!active || !ctx.raid || ctx.raid.state !== 'raid') return;
+      if (!active || !ctx.raid || ctx.raid.state !== 'raid' || ctx.rangeMode) return;
       elapsed += dt;
       if (dropTimes.length && elapsed >= dropTimes[0]) { dropTimes.shift(); startDrop(); }
       if (hvtDue && elapsed >= hvtDue) { hvtDue = 0; pickHvt(); }
