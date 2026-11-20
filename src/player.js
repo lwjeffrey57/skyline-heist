@@ -123,7 +123,7 @@ export class Player {
     const inp = this.input;
     this.slideCd -= dt; this.mantleCd -= dt; this.padCd -= dt;
     if (this.protectT > 0) this.protectT -= dt;
-    this.hurtT += dt; if (this.hurtT > 5 && this.hp < this.maxHp * 0.4 && !this.downed) this.hp = Math.min(this.maxHp * 0.4, this.hp + 25 * dt); // rest only brings you back to 40%: the rest takes a medkit
+    this.hurtT += dt; if (this.hurtT > 5 && this.hp < this.maxHp * 0.4 && !this.downed && !this.noRegen) this.hp = Math.min(this.maxHp * 0.4, this.hp + 25 * dt); // rest only brings you back to 40%: the rest takes a medkit
     if (inp.pressed.has('Space')) this.jumpBuffer = 0.14; else this.jumpBuffer -= dt;
     if ((inp.pressed.has('KeyK') && !this.noManualRespawn) || this.pos.y < -30) this.respawn();
 
@@ -249,7 +249,7 @@ export class Player {
     this.dashCd -= dt;
     if (inp.pressed.has('KeyQ') && this.dashCd <= 0) {
       this.dashX = wx || wz ? wx : fx; this.dashZ = wx || wz ? wz : fz;
-      this.dashT = DASH.time; this.dashCd = DASH.cooldown; this.sliding = false;
+      this.dashT = DASH.time; this.dashCd = this.dashMax = DASH.cooldown * (this.dashCdMul || 1); this.sliding = false;
       this.dashSide = this.dashX * -fz + this.dashZ * fx; // +1 = dashing to your right: the camera leans into it
       this.emit('dash', { x: this.dashX, z: this.dashZ, side: this.dashSide, time: DASH.time });
     }

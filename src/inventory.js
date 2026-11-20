@@ -162,6 +162,7 @@ export function createInventory(ctx, api) {
         <div class="grid" style="grid-template-columns:repeat(4,1fr)">${stash.pack.map((it, i) => slot('pack', i, it)).join('')}</div>
         <button class="mini" data-act="store">Move pack to stash</button> <button class="mini" data-act="sellpack">Sell pack valuables</button>
         <button class="deploy" data-act="deploy">Deploy</button>
+        <button class="deploy" data-act="run" style="margin-top:6px;background:#e0a23a;color:#111">Cashout run · fast, endless, beat your best</button>
         <button class="deploy" data-act="range" style="margin-top:6px;background:transparent;border:1px solid rgba(255,255,255,.35);color:#fff;font-size:12px;padding:8px">Firing range · try and tune every gun</button>
       </div>
       <div>
@@ -256,6 +257,7 @@ export function createInventory(ctx, api) {
     } else if (act && act.dataset.act === 'store') {
       stash.pack.forEach((it, i) => { if (it && stash.grid.indexOf(null) >= 0) { addToStash(it); stash.pack[i] = null; } }); chime([520], 0.05, 0.08, 0.1);
     } else if (act && act.dataset.act === 'deploy') { save(); onDeploy(); return; }
+    else if (act && act.dataset.act === 'run') { save(); if (api.onRun) api.onRun(); return; }
     else if (act && act.dataset.act === 'range') { save(); if (api.onRange) api.onRange(); return; }
     else return;
     save(); render();

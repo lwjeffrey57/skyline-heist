@@ -23,6 +23,7 @@ import * as melee from './melee.js';
 import * as drones from './drones.js';
 import * as turrets from './turrets.js';
 import * as range from './range.js';
+import * as run from './run.js';
 import * as heat from './heat.js';
 import * as worldevents from './worldevents.js';
 import * as raid from './raid.js';
@@ -57,7 +58,7 @@ events.on('pieceSplit', ({ collider, parts }) => {
 events.on('pieceDestroyed', ({ collider }) => { if (collider.zipline) world.removeZipline(collider.zipline); });
 
 const systems = [];
-for (const [name, mod] of Object.entries({ destruction, decor, fx, audio, weapons, bots, raid, heat, worldevents, detect, ui, hudplus, dash, downed, boom, melee, dmgnum, settings, map, drones, turrets, range })) {
+for (const [name, mod] of Object.entries({ destruction, decor, fx, audio, weapons, bots, raid, heat, worldevents, detect, ui, hudplus, dash, downed, boom, melee, dmgnum, settings, map, drones, turrets, range, run })) {
   try { const s = mod.init(ctx); if (s) systems.push({ name, ...s }); } catch (e) { console.error(`[${name}] init failed`, e); }
 }
 
@@ -150,6 +151,7 @@ ctx.events.on('raidEnd', () => { stopT = 0; slowT = 0; });
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.05); last = now;
   let gdt = dt;
+  if (ctx.freeze) gdt = dt * 0.001; else
   if (stopT > 0) { stopT -= dt; gdt = dt * 0.03; } else if (slowT > 0) { slowT -= dt; gdt = dt * (slowT < 0.12 ? slowK + (1 - slowK) * (1 - slowT / 0.12) : slowK); }
   if (playing) step(gdt); else if (!window.__test) player.update(0);
   if (frameN++ % 20 === 0) world.updateLOD(camera.position);

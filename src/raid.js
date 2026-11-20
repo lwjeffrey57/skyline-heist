@@ -444,6 +444,7 @@ export function init(ctx) {
     zones.forEach((zn) => { zn.active = false; zn.unlocked = false; zn.alarmed = false; zn.type = 'open'; });
     order[0].active = true; if (order.length > 2) { const k = order[order.length - 1]; k.active = true; k.type = 'key'; const b = order[Math.floor(order.length / 2)]; b.active = true; b.type = 'beacon'; } else if (order[1]) order[1].active = true;
     zones.forEach((zn) => { const [hex, label] = EXIT_TYPES[zn.type]; zn.title = label; zn.css = `#${hex.toString(16).padStart(6, '0')}`; zn.group.visible = zn.active; zn.group.traverse((o) => { if (o.material && o.material.color) o.material.color.setHex(hex); }); });
+    if (ctx.rangeMode) zones.forEach((zn) => { zn.active = false; zn.group.visible = false; }); // no way out of the range or a run: they end on their own terms
     player.protectTime = RAID.protect; player.respawn();
     if (ctx.weapons) { // deploy with the sidearm only; everything else comes from arms lockers
       const inv = ctx.weapons.inventory, start = inv.some((v) => v.def.id === 'pistol') ? 'pistol' : 'rifle';
@@ -660,6 +661,7 @@ export function init(ctx) {
     stash, save: () => saveStash(stash), GUNS, shopGuns: SHOP_GUNS, UPGRADES, packSize, chime,
     contractsHtml: () => contractRows(false),
     onDeploy: () => { deploy(); const o = document.getElementById('overlay'); if (o) o.click(); }, // the click also captures the mouse
+    onRun: () => { if (ctx.run) { ctx.run.start(); const o = document.getElementById('overlay'); if (o) o.click(); } },
     onRange: () => { if (ctx.range) { ctx.range.start(); const o = document.getElementById('overlay'); if (o) o.click(); } },
   });
   ctx.raid = { endRange: () => endRaid('range'), prizeGun, get revives() { return revives; }, useRevive() { if (revives <= 0) return false; revives--; return true; }, toast, chime, addLootable, rollContents, districtAt, get heat() { return ctx.heat ? ctx.heat.frac : 0; }, get heatTier() { return ctx.heat ? ctx.heat.tier : 1; }, menu, config: RAID, stash, get state() { return state; }, get pack() { return pack; }, get timeLeft() { return timeLeft; }, set timeLeft(t) { timeLeft = t; }, lootables, zones, deploy, endRaid, get armor() { return armor; }, get contracts() { return contracts; }, get keycards() { return keycards; }, get revealT() { return revealT; }, get packOpen() { return packOpen; }, get bagBonus() { return bagBonus; }, packSize, set keycards(n) { keycards = n; }, get phase() { const t = ctx.heat ? ctx.heat.tier : 1; return t >= 4 ? 2 : t >= 2 ? 1 : 0; }, setContracts(ids) { contracts = ids.map((id) => ({ def: CONTRACTS.find((c) => c.id === id), n: 0, done: false })); }, get medkits() { return medkits; } };
@@ -685,7 +687,7 @@ export function init(ctx) {
         }
         return;
       }
-      top.hidden = false; kit.hidden = false; cbox.hidden = !!ctx.rangeMode;
+      top.hidden = !!ctx.runMode; kit.hidden = false; cbox.hidden = !!ctx.rangeMode;
       if (tick10++ % 10 === 0) cbox.innerHTML = `<div class="h">Contracts</div>${contractRows(false)}`;
       if (ctx.rangeMode) timeLeft = RAID.time;
       timeLeft -= dt; healCd -= dt;
@@ -775,7 +777,7 @@ export function init(ctx) {
         const spare = zones.filter((zn) => !zn.active).sort((a, b) => Math.hypot(a.x - player.pos.x, a.z - player.pos.z) - Math.hypot(b.x - player.pos.x, b.z - player.pos.z))[0];
         if (spare) { spare.active = true; spare.type = 'open'; spare.title = 'EXIT'; spare.css = '#9be37a'; spare.group.traverse((o) => { if (o.material && o.material.color) o.material.color.setHex(0x9be37a); }); spare.group.visible = true; toast('Emergency exit open', '#9be37a'); chime([660, 880], 0.1, 0.3, 0.18); }
       }
-      if (exitT >= holdNeed) { endRaid('extracted'); return; }
+      if (exitT >= holdNeed && !ctx.rangeMode) { endRaid('extracted'); return; }
 
       if (inZone) everInZone = true;
       hint.hidden = true; // the first-raid hint banner was removed: the controls are listed on the pause and inventory screens
